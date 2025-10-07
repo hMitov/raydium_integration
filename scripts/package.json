@@ -1,0 +1,9 @@
+{
+  "name": "raydium-pool-fetcher",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "@solana/web3.js": "^1.87.6"
+  }
+}

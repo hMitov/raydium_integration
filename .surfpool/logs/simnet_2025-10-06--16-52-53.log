@@ -1,0 +1,34 @@
+[2025-10-06--16-52-53 INFO actix_server::builder] starting 5 workers
+[2025-10-06--16-52-53 INFO actix_server::server] Tokio runtime found; starting in existing Tokio runtime
+[2025-10-06--16-52-53 INFO actix_server::server] starting service: "actix-web-service-127.0.0.1:18488", workers: 5, listening on: 127.0.0.1:18488
+[2025-10-06--16-52-53 INFO parity_ws] Listening for new connections on 127.0.0.1:8900.
+[2025-10-06--16-52-53 INFO txtx::svm::deploy_program] Failure Recovery Info - An ephemeral authority account will be created and funded to write to the buffer account.
+[2025-10-06--16-52-53 INFO txtx::svm::deploy_program] Failure Recovery Info - Please save the following information in case the deployment fails and the account needs to be recovered:
+[2025-10-06--16-52-53 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority public key: 8GdHNkScF4PGZ9PeoGMmZhYmaTsWztQ6o19PKK2tN6tQ
+[2025-10-06--16-52-53 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority secret key: 6483krn8edajtEMzXA6ZY98PD53PYDp9pfxnjVdrz5zK4DThkvK7LuFgkjEn9iFK7cNFg3cTbw7mrSFWsiNtwSVN
+[2025-10-06--16-52-54 INFO txtx::svm::deploy_program] Account Created - Ephemeral authority account created and funded to write to buffer
+[2025-10-06--16-52-54 INFO txtx::svm::deploy_program] Failure Recovery Info - Creating program buffer account at pubkey 9b5qm47WooTZa1CrB5k8po6tHLV6zpdnAnMaH4qNnwce
+[2025-10-06--16-52-54 INFO txtx::svm::deploy_program] Account Created - Program buffer account created
+[2025-10-06--16-52-55 INFO txtx::svm::deploy_program] Buffer Ready - Writing to buffer account is complete
+[2025-10-06--16-52-55 INFO txtx::svm::deploy_program] Program Created - Program FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ has been deployed
+[2025-10-06--16-52-55 INFO txtx::svm::deploy_program] Complete - Ephemeral authority account closed and leftover funds returned to payer
+[2025-10-06--16-54-02 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61066.
+[2025-10-06--16-55-02 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61095.
+[2025-10-06--16-55-51 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61131.
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Failure Recovery Info - An ephemeral authority account will be created and funded to write to the buffer account.
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Failure Recovery Info - Please save the following information in case the deployment fails and the account needs to be recovered:
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority public key: FKvxRe7Xa7qWPK7MQWKQjjPgnHPJkTZCJnZ1SBqs42ua
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority secret key: 5ZZAmeKwG5iuXDWcQB3RR9j7PGxW5knchP1nUcbkaXL4WxJJxd2RNtdBzvwCS9xDGZza3yohWX3L6GbX9tKMFYpt
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Account Created - Ephemeral authority account created and funded to write to buffer
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Failure Recovery Info - Creating program buffer account at pubkey GDkNMftSUvWvNtpP9zo65xCy8jggrLDEKXrp17KnzuYM
+[2025-10-06--17-03-12 INFO txtx::svm::deploy_program] Account Created - Program buffer account created
+[2025-10-06--17-03-14 INFO txtx::svm::deploy_program] Buffer Ready - Writing to buffer account is complete
+[2025-10-06--17-03-14 INFO txtx::svm::deploy_program] Buffer Authority Transferred - Buffer authority has been transferred to authority signer
+[2025-10-06--17-03-14 INFO txtx::svm::deploy_program] Program Upgraded - Program FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ has been upgraded
+[2025-10-06--17-03-14 INFO txtx::svm::deploy_program] Complete - Ephemeral authority account closed and leftover funds returned to payer
+[2025-10-06--17-03-27 INFO actix_server::worker] shutting down idle worker
+[2025-10-06--17-03-27 INFO actix_server::worker] shutting down idle worker
+[2025-10-06--17-03-27 INFO actix_server::worker] shutting down idle worker
+[2025-10-06--17-03-27 INFO actix_server::worker] shutting down idle worker
+[2025-10-06--17-03-27 INFO actix_server::accept] accept thread stopped
+[2025-10-06--17-03-27 INFO actix_server::worker] shutting down idle worker

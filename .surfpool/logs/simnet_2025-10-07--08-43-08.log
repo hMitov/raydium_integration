@@ -1,0 +1,50 @@
+[2025-10-07--08-43-08 INFO actix_server::builder] starting 5 workers
+[2025-10-07--08-43-08 INFO actix_server::server] Tokio runtime found; starting in existing Tokio runtime
+[2025-10-07--08-43-08 INFO actix_server::server] starting service: "actix-web-service-127.0.0.1:18488", workers: 5, listening on: 127.0.0.1:18488
+[2025-10-07--08-43-09 INFO parity_ws] Listening for new connections on 127.0.0.1:8900.
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Failure Recovery Info - An ephemeral authority account will be created and funded to write to the buffer account.
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Failure Recovery Info - Please save the following information in case the deployment fails and the account needs to be recovered:
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority public key: BLCCfnaaT4pKwZhKe48fn7ovSRxGRn4gEi7zt7NK3YXw
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority secret key: 4ev74fwhhs5VAeLLsWGHFEUQVmSn1aQp8gYUPL1MbGUx5DfCXJnL8ajagxzPpzYFHYEJahJz4AYASYurNWKUkPZo
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Account Created - Ephemeral authority account created and funded to write to buffer
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Failure Recovery Info - Creating program buffer account at pubkey 3WA4WbpyTgEvY95QN5Wa7SAdvLJgvL2gEKoonWMcegWY
+[2025-10-07--08-43-09 INFO txtx::svm::deploy_program] Account Created - Program buffer account created
+[2025-10-07--08-43-11 INFO txtx::svm::deploy_program] Buffer Ready - Writing to buffer account is complete
+[2025-10-07--08-43-11 INFO txtx::svm::deploy_program] Program Created - Program FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ has been deployed
+[2025-10-07--08-43-11 INFO txtx::svm::deploy_program] Complete - Ephemeral authority account closed and leftover funds returned to payer
+[2025-10-07--08-43-18 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61514.
+[2025-10-07--08-43-37 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61530.
+[2025-10-07--08-43-38 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61541.
+[2025-10-07--08-48-42 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61632.
+[2025-10-07--08-48-43 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61641.
+[2025-10-07--08-49-42 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61664.
+[2025-10-07--08-49-43 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61673.
+[2025-10-07--08-57-00 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61840.
+[2025-10-07--08-57-01 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:61849.
+[2025-10-07--09-09-37 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:62100.
+[2025-10-07--09-09-39 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:62109.
+[2025-10-07--09-10-15 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:62130.
+[2025-10-07--09-14-03 INFO actix_server::server] SIGTERM received; starting graceful shutdown
+[2025-10-07--09-14-03 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--09-14-03 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--09-14-03 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--09-14-03 INFO actix_server::accept] accept thread stopped
+[2025-10-07--09-14-03 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--09-14-03 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--09-14-46 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:62266.
+[2025-10-07--09-14-47 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:62275.
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Failure Recovery Info - An ephemeral authority account will be created and funded to write to the buffer account.
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Failure Recovery Info - Please save the following information in case the deployment fails and the account needs to be recovered:
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority public key: HGQ6oLAyectX56g7kErAhRHoNyBE8cJKgrAB69zopSmG
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority secret key: 3a6dQy2WGYDJW8uJw6DasDWrWhHcsGhTJdDgst7sMG978R7RetWdC2bRGyf3NwSJyaLnuxBxoPaMmc9MmKXCzUFL
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Account Created - Ephemeral authority account created and funded to write to buffer
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Failure Recovery Info - Creating program buffer account at pubkey HdR9yzbVYNAkvJeF9N5pie6VXrMnd5oh4MPZNFUKhWYD
+[2025-10-07--09-41-43 INFO txtx::svm::deploy_program] Account Created - Program buffer account created
+[2025-10-07--09-41-45 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:63711.
+[2025-10-07--09-41-45 INFO txtx::svm::deploy_program] Buffer Ready - Writing to buffer account is complete
+[2025-10-07--09-41-45 INFO txtx::svm::deploy_program] Buffer Authority Transferred - Buffer authority has been transferred to authority signer
+[2025-10-07--09-41-45 INFO txtx::svm::deploy_program] Program Upgraded - Program FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ has been upgraded
+[2025-10-07--09-41-45 INFO txtx::svm::deploy_program] Complete - Ephemeral authority account closed and leftover funds returned to payer
+[2025-10-07--09-41-45 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:63843.
+[2025-10-07--09-48-00 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:63977.
+[2025-10-07--09-48-01 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:63986.

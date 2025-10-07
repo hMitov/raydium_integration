@@ -1,0 +1,32 @@
+[2025-10-07--08-21-59 INFO actix_server::builder] starting 5 workers
+[2025-10-07--08-21-59 INFO actix_server::server] Tokio runtime found; starting in existing Tokio runtime
+[2025-10-07--08-21-59 INFO actix_server::server] starting service: "actix-web-service-127.0.0.1:18488", workers: 5, listening on: 127.0.0.1:18488
+[2025-10-07--08-21-59 INFO parity_ws] Listening for new connections on 127.0.0.1:8900.
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Failure Recovery Info - An ephemeral authority account will be created and funded to write to the buffer account.
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Failure Recovery Info - Please save the following information in case the deployment fails and the account needs to be recovered:
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority public key: C5Ac7nygMGaHEEjEwxh9ed5L7tAZfGg8ctYpbm9AZJS4
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Failure Recovery Info - Ephemeral authority secret key: GXuJKLPPgz4pomHYY1ncpm8MbTHYv19c6EcCSMCEsdVzkekYpbn3xhF3XNhyJnn24c4n98AdyUg8p4DEu9KtCGQ
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Account Created - Ephemeral authority account created and funded to write to buffer
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Failure Recovery Info - Creating program buffer account at pubkey 7NRvBvxNP6BJrzXHARnzuDt5Y44rjwJKA8WXQZkTEjLj
+[2025-10-07--08-22-00 INFO txtx::svm::deploy_program] Account Created - Program buffer account created
+[2025-10-07--08-22-01 INFO txtx::svm::deploy_program] Buffer Ready - Writing to buffer account is complete
+[2025-10-07--08-22-01 INFO txtx::svm::deploy_program] Program Created - Program FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ has been deployed
+[2025-10-07--08-22-01 INFO txtx::svm::deploy_program] Complete - Ephemeral authority account closed and leftover funds returned to payer
+[2025-10-07--08-22-07 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60279.
+[2025-10-07--08-25-46 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60387.
+[2025-10-07--08-25-47 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60397.
+[2025-10-07--08-27-53 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60431.
+[2025-10-07--08-27-54 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60439.
+[2025-10-07--08-34-01 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60530.
+[2025-10-07--08-34-02 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60537.
+[2025-10-07--08-35-04 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60552.
+[2025-10-07--08-35-05 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60559.
+[2025-10-07--08-40-18 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60660.
+[2025-10-07--08-42-00 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60713.
+[2025-10-07--08-42-58 INFO parity_ws::io] Accepted a new tcp connection from 127.0.0.1:60741.
+[2025-10-07--08-43-06 INFO actix_server::accept] accept thread stopped
+[2025-10-07--08-43-06 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--08-43-06 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--08-43-06 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--08-43-06 INFO actix_server::worker] shutting down idle worker
+[2025-10-07--08-43-06 INFO actix_server::worker] shutting down idle worker
