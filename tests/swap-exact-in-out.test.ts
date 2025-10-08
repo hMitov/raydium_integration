@@ -3,25 +3,22 @@ import { BN, Program } from "@coral-xyz/anchor";
 import {
   PublicKey,
   SystemProgram,
-  Transaction,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-  createSyncNativeInstruction,
   getAccount,
-  createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
 import { RaydiumIntegration } from "../target/types/raydium_integration";
+import { ensureTokenAccount, wrapSolToWsol, findOptimalPool } from "./utils/swap-utils";
+import { expect } from "chai";
+import { TickUtils, getPdaTickArrayAddress } from "@raydium-io/raydium-sdk-v2";
 
 describe("raydium_integration_swaps", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
   const program = anchor.workspace.RaydiumIntegration as Program<RaydiumIntegration>;
   const wallet = provider.wallet.publicKey;
-
-  console.log("Wallet:", wallet.toBase58());
 
   // Raydium CLMM mainnet constants
   const CLMM_PROGRAM = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
@@ -41,60 +38,34 @@ describe("raydium_integration_swaps", () => {
     program.programId
   );
 
-  async function ensureTokenAccount(mint: PublicKey, owner: PublicKey) {
-    const ata = getAssociatedTokenAddressSync(mint, owner);
-    try {
-      await getAccount(provider.connection, ata);
-      console.log(`ATA exists for ${mint.toBase58()}`);
-    } catch {
-      console.log(`Creating ATA for ${mint.toBase58()}...`);
-      const tx = new Transaction().add(
-        createAssociatedTokenAccountInstruction(wallet, ata, owner, mint)
-      );
-      await provider.sendAndConfirm(tx);
-      console.log(`Created ATA: ${ata.toBase58()}`);
-    }
-    return ata;
-  }
-
-  it("sets custom slippage tolerance", async () => {
+  it("sets slippage", async () => {
     const tx = await program.methods
       .setSlippage(300) // 3%
       .accountsStrict({
         owner: wallet,
         userCfg: USER_CFG,
         systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+      }).rpc();
 
     console.log("Slippage set to 3%");
     console.log("Signature:", tx);
   });
 
-  it("performs a proxy swap exact in (SOL → USDC)", async () => {
-    const usdcAta = await ensureTokenAccount(OUTPUT_VAULT_MINT, wallet);
-    const wsolAta = await ensureTokenAccount(INPUT_VAULT_MINT, wallet);
+  it("swaps exact in (WSOL → USDC)", async () => {
+    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
 
     // Wrap 1 SOL into WSOL
-    const wrapAmount = 1 * LAMPORTS_PER_SOL;
-    const transferTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: wallet,
-        toPubkey: wsolAta,
-        lamports: wrapAmount,
-      }),
-      createSyncNativeInstruction(wsolAta)
-    );
-    await provider.sendAndConfirm(transferTx);
-    console.log("Wrapped 1 SOL into WSOL");
+    wrapSolToWsol(provider, wallet, wsolAta, 1);
 
     // Expected USDC (quote)
+    const amountIn = new BN("1000000000");
     const expectedUsdc = new BN("130000000"); // 130 USDC expected for 1 SOL
     const sqrtPriceLimitX64 = new BN(0);
     const isBaseInput = true;
 
     const tx = await program.methods
-      .proxySwap(new BN("1000000000"), expectedUsdc, sqrtPriceLimitX64, isBaseInput)
+      .proxySwap(amountIn, expectedUsdc, sqrtPriceLimitX64, isBaseInput)
       .accountsStrict({
         clmmProgram: CLMM_PROGRAM,
         payer: wallet,
@@ -108,59 +79,40 @@ describe("raydium_integration_swaps", () => {
         observationState: OBSERVATION_STATE,
         tokenProgram: TOKEN_PROGRAM_ID,
         tickArray: TICK_ARRAY,
-      })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      }).rpc({ skipPreflight: true, commitment: "confirmed" });
 
     console.log("Exact in swap sent successfully!");
-    console.log("Signature:", tx);
 
     // Verify the swap worked
-    const wsolBalanceAfter = await getAccount(provider.connection, wsolAta);
     const usdcBalanceAfter = await getAccount(provider.connection, usdcAta);
-    
-    console.log("Verification Results:");
-    console.log(`WSOL balance after: ${wsolBalanceAfter.amount.toString()}`);
-    console.log(`USDC balance after: ${usdcBalanceAfter.amount.toString()}`);
-    
+
     // Calculate actual slippage
     const expectedUsdcBN = new BN(expectedUsdc.toString());
     const actualUsdc = new BN(usdcBalanceAfter.amount.toString());
     const slippageBps = expectedUsdcBN.sub(actualUsdc).mul(new BN(10000)).div(expectedUsdcBN);
-    console.log(`Actual slippage: ${slippageBps.toString()} bps (${slippageBps.toNumber() / 100}%)`);
-    
+
     // Verify slippage is within 3% tolerance
-    if (slippageBps.toNumber() <= 300) {
-      console.log("Slippage within 3% tolerance");
-    } else {
-      console.log("Slippage exceeded 3% tolerance");
-    }
+    expect(slippageBps.toNumber()).to.be.lessThanOrEqual(300);
   });
 
-  it("performs a proxy swap exact out (WSOL → USDC)", async () => {
-    const usdcAta = await ensureTokenAccount(OUTPUT_VAULT_MINT, wallet);
-    const wsolAta = await ensureTokenAccount(INPUT_VAULT_MINT, wallet);
+  it("swaps exact out (WSOL → USDC)", async () => {
+    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
 
     // Add more SOL to WSOL account for exact out test
-    const additionalSol = 0.5 * LAMPORTS_PER_SOL; // 0.5 SOL
-    const transferTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: wallet,
-        toPubkey: wsolAta,
-        lamports: additionalSol,
-      }),
-      createSyncNativeInstruction(wsolAta)
-    );
-    await provider.sendAndConfirm(transferTx);
-    console.log("💧 Added more SOL to WSOL for exact out test");
+    await wrapSolToWsol(provider, wallet, wsolAta, 0.5);
 
     // Desired output and expected input (smaller amount)
     const desiredOut = new BN("100000"); // 0.1 USDC (smaller amount)
-    const expectedIn = new BN("100000000"); // max 0.1 SOL
+    const expectedMaxIn = new BN("100000000"); // max 0.1 SOL
     const sqrtPriceLimitX64 = new BN(0);
     const isBaseInput = false;
 
+    const wsolBefore = await getAccount(provider.connection, wsolAta);
+    const usdcBefore = await getAccount(provider.connection, usdcAta);
+
     const tx = await program.methods
-      .proxySwap(desiredOut, expectedIn, sqrtPriceLimitX64, isBaseInput)
+      .proxySwap(desiredOut, expectedMaxIn, sqrtPriceLimitX64, isBaseInput)
       .accountsStrict({
         clmmProgram: CLMM_PROGRAM,
         payer: wallet,
@@ -174,43 +126,192 @@ describe("raydium_integration_swaps", () => {
         observationState: OBSERVATION_STATE,
         tokenProgram: TOKEN_PROGRAM_ID,
         tickArray: TICK_ARRAY,
-      })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
-
-    console.log("Exact out swap sent successfully!");
-    console.log("Signature:", tx);
+      }).rpc({ skipPreflight: true, commitment: "confirmed" });
 
     // Verify the exact out swap worked
-    const wsolBalanceAfter = await getAccount(provider.connection, wsolAta);
+    const wsolAfter = await getAccount(provider.connection, wsolAta);
+    const usdcAfter = await getAccount(provider.connection, usdcAta);
+
+    const usdcReceived = new BN(usdcAfter.amount.toString())
+      .sub(new BN(usdcBefore.amount.toString()));
+    const wsolSpent = new BN(wsolBefore.amount.toString())
+      .sub(new BN(wsolAfter.amount.toString()));
+
+    // --- Assertions ---
+    // Check output amount reached target
+    expect(usdcReceived.gte(desiredOut), "USDC received less than desired").to.be.true;
+
+    // Check slippage (input side) - for exact out, compare actual spent vs max allowed
+    const slippageBps = wsolSpent.mul(new BN(10000)).div(expectedMaxIn);
+
+    console.log(`WSOL spent: ${wsolSpent.toNumber() / LAMPORTS_PER_SOL} SOL`);
+    console.log(`Slippage: ${slippageBps.toNumber() / 100}%`);
+
+    expect(slippageBps.toNumber(), "Input slippage exceeds 5% tolerance").to.be.lte(500);
+  });
+
+  it("finds best pool and swaps exact in (WSOL → USDC)", async () => {
+    const amountIn = new BN(1_000_000_000); // 1 SOL in lamports
+    const { bestPool, bestOutput, poolKeys } = await findOptimalPool(
+      provider.connection,
+      wallet,
+      INPUT_VAULT_MINT,
+      OUTPUT_VAULT_MINT,
+      amountIn,
+      true
+    );
+
+    // --- Ensure user token accounts exist ---
+    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
+
+    // --- Wrap 1 SOL into WSOL for test ---
+    wrapSolToWsol(provider, wallet, wsolAta, 1);
+
+    const sqrtPriceLimitX64 = new BN(0);
+    const isBaseInput = true;
+
+    console.log("bestPool.ammConfig", bestPool.ammConfig);
+
+    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
+      poolKeys.tickCurrent,
+      poolKeys.tickSpacing
+    );
+
+    console.log("startTickIndex", startTickIndex);
+
+    console.log("CLMM_PROGRAM", CLMM_PROGRAM);
+    console.log("bestPool.id", bestPool.id);
+
+    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
+      new PublicKey(CLMM_PROGRAM),  // Convert string to PublicKey
+      new PublicKey(bestPool.id),   // Convert string to PublicKey
+      startTickIndex
+    );
+    console.log("TickArray PDA:", tickArrayAddr);
+
+
+    // --- Execute the swap through your program using optimal pool ---
+    console.log("Executing swap with optimal pool...");
+    const tx = await program.methods
+      .proxySwap(
+        amountIn,                              // amount in (1 SOL)
+        bestOutput,                            // expected_other_amount (USDC)
+        sqrtPriceLimitX64,
+        isBaseInput
+      )
+      .accountsStrict({
+        clmmProgram: CLMM_PROGRAM,
+        payer: wallet,
+        userCfg: USER_CFG,
+        ammConfig: poolKeys.ammConfig.id, 
+        poolState: bestPool.id,
+        inputTokenAccount: wsolAta,
+        outputTokenAccount: usdcAta,
+        inputVault: poolKeys.vaultA,
+        outputVault: poolKeys.vaultB,
+        observationState: poolKeys.observationId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        tickArray: tickArrayAddr,
+      }).rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    console.log("Swap executed successfully!");
+
+    // Verify the swap worked
     const usdcBalanceAfter = await getAccount(provider.connection, usdcAta);
-    
-    console.log("Exact Out Verification Results:");
-    console.log(`WSOL balance after: ${wsolBalanceAfter.amount.toString()}`);
-    console.log(`USDC balance after: ${usdcBalanceAfter.amount.toString()}`);
-    
-    // For exact out, verify we got the desired amount
+
+    // Calculate actual slippage
+    const expectedUsdcBN = new BN(bestOutput.toString());
     const actualUsdc = new BN(usdcBalanceAfter.amount.toString());
-    const desiredUsdcBN = new BN(desiredOut.toString());
-    
-    if (actualUsdc.gte(desiredUsdcBN)) {
-      console.log("Received desired USDC amount or more");
-    } else {
-      console.log("Did not receive desired USDC amount");
-    }
-    
-    // Calculate how much WSOL was actually spent
-    const wsolSpent = new BN("1000000000").sub(new BN(wsolBalanceAfter.amount.toString()));
-    console.log(`WSOL spent: ${wsolSpent.toString()} lamports (${wsolSpent.toNumber() / LAMPORTS_PER_SOL} SOL)`);
-    
-    // Verify slippage for exact out (input amount vs expected)
-    const expectedInputBN = new BN(expectedIn.toString());
-    const slippageBps = wsolSpent.sub(expectedInputBN).mul(new BN(10000)).div(expectedInputBN);
-    console.log(`Input slippage: ${slippageBps.toString()} bps (${slippageBps.toNumber() / 100}%)`);
-    
-    if (slippageBps.toNumber() <= 300) {
-      console.log("Input slippage within 3% tolerance");
-    } else {
-      console.log("Input slippage exceeded 3% tolerance");
-    }
+    const slippageBps = expectedUsdcBN.sub(actualUsdc).mul(new BN(10000)).div(expectedUsdcBN);
+
+    // Verify slippage is within 3% tolerance
+    expect(slippageBps.toNumber()).to.be.lessThanOrEqual(500);
+  });
+
+  it("finds best pool and swaps exact out (WSOL → USDC)", async () => {
+    const desiredOut = new BN("100000"); // 0.1 USDC (smaller amount)
+
+    const { bestPool, bestOutput, poolKeys } = await findOptimalPool(
+      provider.connection,
+      wallet,
+      INPUT_VAULT_MINT,
+      OUTPUT_VAULT_MINT,
+      desiredOut,
+      false
+    );
+
+    console.log("bestOutput", bestOutput);
+
+    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
+
+    // Add more SOL to WSOL account for exact out test
+    await wrapSolToWsol(provider, wallet, wsolAta, 0.5);
+
+    // Desired output and expected input (smaller amount)
+    // const expectedMaxIn = new BN("100000000"); // max 0.1 SOL
+    const expectedMaxIn = bestOutput;
+
+    const sqrtPriceLimitX64 = new BN(0);
+    const isBaseInput = false;
+
+    const wsolBefore = await getAccount(provider.connection, wsolAta);
+    const usdcBefore = await getAccount(provider.connection, usdcAta);
+
+    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
+      poolKeys.tickCurrent,
+      poolKeys.tickSpacing
+    );
+
+    console.log("startTickIndex", startTickIndex);
+
+    console.log("CLMM_PROGRAM", CLMM_PROGRAM);
+    console.log("bestPool.id", bestPool.id);
+
+    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
+      new PublicKey(CLMM_PROGRAM),  // Convert string to PublicKey
+      new PublicKey(bestPool.id),   // Convert string to PublicKey
+      startTickIndex
+    );
+    console.log("TickArray PDA:", tickArrayAddr);
+
+    const tx = await program.methods
+      .proxySwap(desiredOut, expectedMaxIn, sqrtPriceLimitX64, isBaseInput)
+      .accountsStrict({
+        clmmProgram: CLMM_PROGRAM,
+        payer: wallet,
+        userCfg: USER_CFG,
+        ammConfig: poolKeys.ammConfig.id,
+        poolState: bestPool.id,
+        inputTokenAccount: wsolAta,
+        outputTokenAccount: usdcAta,
+        inputVault: poolKeys.vaultA,
+        outputVault: poolKeys.vaultB,
+        observationState: poolKeys.observationId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        tickArray: tickArrayAddr,
+      }).rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    // Verify the exact out swap worked
+    const wsolAfter = await getAccount(provider.connection, wsolAta);
+    const usdcAfter = await getAccount(provider.connection, usdcAta);
+
+    const usdcReceived = new BN(usdcAfter.amount.toString())
+      .sub(new BN(usdcBefore.amount.toString()));
+    const wsolSpent = new BN(wsolBefore.amount.toString())
+      .sub(new BN(wsolAfter.amount.toString()));
+
+    // --- Assertions ---
+    // Check output amount reached target
+    expect(usdcReceived.gte(desiredOut), "USDC received less than desired").to.be.true;
+
+    // Check slippage (input side) - for exact out, compare actual spent vs max allowed
+    const slippageBps = wsolSpent.mul(new BN(10000)).div(expectedMaxIn);
+
+    console.log(`WSOL spent: ${wsolSpent.toNumber() / LAMPORTS_PER_SOL} SOL`);
+    console.log(`Slippage: ${slippageBps.toNumber() / 100}%`);
+
+    expect(slippageBps.toNumber(), "Input slippage exceeds 5% tolerance").to.be.lte(500);
   });
 });
