@@ -1,11 +1,13 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token};
-use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
+use anchor_spl::token::Token;
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token_interface::{TokenAccount, Token2022, Mint};
+use anchor_spl::metadata::Metadata;
 use raydium_amm_v3::{
     cpi,
     program::AmmV3,
     states::{
-        AmmConfig, ObservationState, PoolState, TickArrayState, POSITION_SEED, PersonalPositionState, ProtocolPositionState
+        AmmConfig, ObservationState, PoolState, TickArrayState, POSITION_SEED, TICK_ARRAY_SEED
     }
 };
 
@@ -76,38 +78,55 @@ pub mod raydium_integration {
         )
     }
 
-    pub fn proxy_increase_liquidity<'a, 'b, 'c: 'info, 'info>(
-        ctx: Context<'a, 'b, 'c, 'info, ProxyIncreaseLiquidity<'info>>,
+    pub fn proxy_open_position<'a, 'b, 'c: 'info, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, ProxyOpenPosition<'info>>,
+        tick_lower_index: i32,
+        tick_upper_index: i32,
+        tick_array_lower_start_index: i32,
+        tick_array_upper_start_index: i32,
         liquidity: u128,
         amount_0_max: u64,
         amount_1_max: u64,
-        base_flag: bool,
+        with_matedata: bool,
+        base_flag: Option<bool>,
     ) -> Result<()> {
-        let cpi_accounts = cpi::accounts::IncreaseLiquidityV2 {
-            nft_owner: ctx.accounts.nft_owner.to_account_info(),
-            nft_account: ctx.accounts.nft_account.to_account_info(),
+        let cpi_accounts = cpi::accounts::OpenPositionV2 {
+            payer: ctx.accounts.payer.to_account_info(),
+            position_nft_owner: ctx.accounts.position_nft_owner.to_account_info(),
+            position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            metadata_account: ctx.accounts.metadata_account.to_account_info(),
             pool_state: ctx.accounts.pool_state.to_account_info(),
             protocol_position: ctx.accounts.protocol_position.to_account_info(),
-            personal_position: ctx.accounts.personal_position.to_account_info(),
             tick_array_lower: ctx.accounts.tick_array_lower.to_account_info(),
             tick_array_upper: ctx.accounts.tick_array_upper.to_account_info(),
+            personal_position: ctx.accounts.personal_position.to_account_info(),
             token_account_0: ctx.accounts.token_account_0.to_account_info(),
             token_account_1: ctx.accounts.token_account_1.to_account_info(),
             token_vault_0: ctx.accounts.token_vault_0.to_account_info(),
             token_vault_1: ctx.accounts.token_vault_1.to_account_info(),
+            rent: ctx.accounts.rent.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
             token_program: ctx.accounts.token_program.to_account_info(),
+            associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
+            metadata_program: ctx.accounts.metadata_program.to_account_info(),
             token_program_2022: ctx.accounts.token_program_2022.to_account_info(),
             vault_0_mint: ctx.accounts.vault_0_mint.to_account_info(),
             vault_1_mint: ctx.accounts.vault_1_mint.to_account_info(),
         };
         let cpi_context = CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts)
             .with_remaining_accounts(ctx.remaining_accounts.to_vec());
-        cpi::increase_liquidity_v2(
+        cpi::open_position_v2(
             cpi_context,
+            tick_lower_index,
+            tick_upper_index,
+            tick_array_lower_start_index,
+            tick_array_upper_start_index,
             liquidity,
             amount_0_max,
             amount_1_max,
-            Some(base_flag),
+            with_matedata,
+            base_flag,
         )
     }
 }
@@ -176,54 +195,91 @@ pub struct ProxySwap<'info> {
 }
 
 #[derive(Accounts)]
-pub struct ProxyIncreaseLiquidity<'info> {
+#[instruction(tick_lower_index: i32, tick_upper_index: i32,tick_array_lower_start_index:i32,tick_array_upper_start_index:i32)]
+pub struct ProxyOpenPosition<'info> {
     pub clmm_program: Program<'info, AmmV3>,
     /// Pays to mint the position
-    pub nft_owner: Signer<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
 
-    /// The token account for nft
-    #[account(
-        constraint = nft_account.mint == personal_position.nft_mint,
-        token::token_program = token_program,
-    )]
-    pub nft_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: Receives the position NFT
+    pub position_nft_owner: UncheckedAccount<'info>,
 
+    /// CHECK: Unique token mint address, random keypair
+    #[account(mut)]
+    pub position_nft_mint: Signer<'info>,
+
+    /// CHECK: Token account where position NFT will be minted
+    /// This account created in the contract by cpi to avoid large stack variables
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// To store metaplex metadata
+    /// CHECK: Safety check performed inside function body
+    #[account(mut)]
+    pub metadata_account: UncheckedAccount<'info>,
+
+    /// Add liquidity for this pool
     #[account(mut)]
     pub pool_state: AccountLoader<'info, PoolState>,
 
+    /// CHECK: Store the information of market marking in range
     #[account(
         mut,
         seeds = [
             POSITION_SEED.as_bytes(),
             pool_state.key().as_ref(),
-            &personal_position.tick_lower_index.to_be_bytes(),
-            &personal_position.tick_upper_index.to_be_bytes(),
+            &tick_lower_index.to_be_bytes(),
+            &tick_upper_index.to_be_bytes(),
         ],
         seeds::program = clmm_program,
         bump,
     )]
-    pub protocol_position: Box<Account<'info, ProtocolPositionState>>,
+    pub protocol_position: UncheckedAccount<'info>,
 
-    /// Increase liquidity for this position
-    #[account(mut, constraint = personal_position.pool_id == pool_state.key())]
-    pub personal_position: Box<Account<'info, PersonalPositionState>>,
+    /// CHECK: Account to mark the lower tick as initialized
+    #[account(
+        mut,
+        seeds = [
+            TICK_ARRAY_SEED.as_bytes(),
+            pool_state.key().as_ref(),
+            &tick_array_lower_start_index.to_be_bytes(),
+        ],
+        seeds::program = clmm_program,
+        bump,
+    )]
+    pub tick_array_lower: UncheckedAccount<'info>,
 
-    /// Stores init state for the lower tick
-    #[account(mut, constraint = tick_array_lower.load()?.pool_id == pool_state.key())]
-    pub tick_array_lower: AccountLoader<'info, TickArrayState>,
+    /// CHECK:Account to store data for the position's upper tick
+    #[account(
+        mut,
+        seeds = [
+            TICK_ARRAY_SEED.as_bytes(),
+            pool_state.key().as_ref(),
+            &tick_array_upper_start_index.to_be_bytes(),
+        ],
+        seeds::program = clmm_program,
+        bump,
+    )]
+    pub tick_array_upper: UncheckedAccount<'info>,
 
-    /// Stores init state for the upper tick
-    #[account(mut, constraint = tick_array_upper.load()?.pool_id == pool_state.key())]
-    pub tick_array_upper: AccountLoader<'info, TickArrayState>,
+    /// CHECK: personal position state
+    #[account(
+        mut,
+        seeds = [POSITION_SEED.as_bytes(), position_nft_mint.key().as_ref()],
+        bump,
+        seeds::program = clmm_program,
+    )]
+    pub personal_position: UncheckedAccount<'info>,
 
-    /// The payer's token account for token_0
+    /// The token_0 account deposit token to the pool
     #[account(
         mut,
         token::mint = token_vault_0.mint
     )]
     pub token_account_0: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The token account spending token_1 to mint the position
+    /// The token_1 account deposit token to the pool
     #[account(
         mut,
         token::mint = token_vault_1.mint
@@ -244,21 +300,30 @@ pub struct ProxyIncreaseLiquidity<'info> {
     )]
     pub token_vault_1: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Sysvar for token mint and ATA creation
+    pub rent: Sysvar<'info, Rent>,
+
+    /// Program to create the position manager state account
+    pub system_program: Program<'info, System>,
+
     /// Program to create mint account and mint tokens
     pub token_program: Program<'info, Token>,
+    /// Program to create an ATA for receiving position NFT
+    pub associated_token_program: Program<'info, AssociatedToken>,
 
-    /// Token program 2022
+    /// Program to create NFT metadata
+    /// CHECK: Metadata program address constraint applied
+    pub metadata_program: Program<'info, Metadata>,
+    /// Program to create mint account and mint tokens
     pub token_program_2022: Program<'info, Token2022>,
-
     /// The mint of token vault 0
     #[account(
-            address = token_vault_0.mint
+        address = token_vault_0.mint
     )]
     pub vault_0_mint: Box<InterfaceAccount<'info, Mint>>,
-
     /// The mint of token vault 1
     #[account(
-            address = token_vault_1.mint
+        address = token_vault_1.mint
     )]
     pub vault_1_mint: Box<InterfaceAccount<'info, Mint>>,
     // remaining account
