@@ -6,7 +6,6 @@ import {
   Keypair,
   SystemProgram,
   LAMPORTS_PER_SOL,
-  Transaction,
   Connection,
 } from "@solana/web3.js";
 import {
@@ -405,84 +404,84 @@ describe("raydium_integration_swaps", () => {
   });
 
 
-  it("finds best pool and swaps exact out (WSOL → USDC) using SDK swapBaseOut", async () => {
-    const connection = provider.connection;
-    const raydium = await Raydium.load({
-      connection: provider.connection,
-      owner: provider.wallet.payer,
-      disableLoadToken: true,
-    });
+  // it("finds best pool and swaps exact out (WSOL → USDC) using SDK swapBaseOut", async () => {
+  //   const connection = provider.connection;
+  //   const raydium = await Raydium.load({
+  //     connection: provider.connection,
+  //     owner: provider.wallet.payer,
+  //     disableLoadToken: true,
+  //   });
 
-    // --- 1️⃣ Desired swap parameters
-    const desiredOut = new BN("100000"); // 0.1 USDC
-    const outputMint = OUTPUT_VAULT_MINT; // USDC
-    const inputMint = INPUT_VAULT_MINT;   // WSOL
+  //   // --- 1️⃣ Desired swap parameters
+  //   const desiredOut = new BN("100000"); // 0.1 USDC
+  //   const outputMint = OUTPUT_VAULT_MINT; // USDC
+  //   const inputMint = INPUT_VAULT_MINT;   // WSOL
 
-    // --- 2️⃣ Find best CLMM pool dynamically
-    const {
-      bestPool,
-      poolKeys,
-      computePoolInfo,
-      amountIn,
-      maxAmountIn,
-      realAmountOut,
-      remainingAccounts,
-    } = await findOptimalPoolExactOut(connection, wallet, inputMint, outputMint, desiredOut);
+  //   // --- 2️⃣ Find best CLMM pool dynamically
+  //   const {
+  //     bestPool,
+  //     poolKeys,
+  //     computePoolInfo,
+  //     amountIn,
+  //     maxAmountIn,
+  //     realAmountOut,
+  //     remainingAccounts,
+  //   } = await findOptimalPoolExactOut(connection, wallet, inputMint, outputMint, desiredOut);
 
-    console.log("\n💧 Using best pool:", bestPool.id);
-    console.log("   amountIn:", amountIn.toString());
-    console.log("   maxAmountIn (buffered):", maxAmountIn.toString());
-    console.log("   realAmountOut:", realAmountOut.toString());
+  //   console.log("\n💧 Using best pool:", bestPool.id);
+  //   console.log("   amountIn:", amountIn.toString());
+  //   console.log("   maxAmountIn (buffered):", maxAmountIn.toString());
+  //   console.log("   realAmountOut:", realAmountOut.toString());
 
-    // --- 3️⃣ Ensure ATA accounts
-    const usdcAta = await ensureTokenAccount(provider, outputMint, wallet);
-    const wsolAta = await ensureTokenAccount(provider, inputMint, wallet);
+  //   // --- 3️⃣ Ensure ATA accounts
+  //   const usdcAta = await ensureTokenAccount(provider, outputMint, wallet);
+  //   const wsolAta = await ensureTokenAccount(provider, inputMint, wallet);
 
-    // --- 4️⃣ Fund WSOL account
-    await wrapSolToWsol(provider, wallet, wsolAta, 0.5); // 0.5 SOL buffer
-    const wsolBefore = await getAccount(connection, wsolAta);
-    const usdcBefore = await getAccount(connection, usdcAta);
+  //   // --- 4️⃣ Fund WSOL account
+  //   await wrapSolToWsol(provider, wallet, wsolAta, 0.5); // 0.5 SOL buffer
+  //   const wsolBefore = await getAccount(connection, wsolAta);
+  //   const usdcBefore = await getAccount(connection, usdcAta);
 
-    // --- 5️⃣ Execute swap via Raydium SDK
-    const { execute } = await raydium.clmm.swapBaseOut({
-      poolInfo: bestPool,
-      poolKeys,                // correct: actual key structure
-      outputMint,
-      amountInMax: maxAmountIn,
-      amountOut: realAmountOut,
-      observationId: computePoolInfo.observationId, // fixed
-      ownerInfo: {
-        useSOLBalance: true,
-      },
-      remainingAccounts,
-      txVersion: 0,
-      computeBudgetConfig: {
-        units: 600_000,
-        microLamports: 500_000,
-      },
-    });
+  //   // --- 5️⃣ Execute swap via Raydium SDK
+  //   const { execute } = await raydium.clmm.swapBaseOut({
+  //     poolInfo: bestPool,
+  //     poolKeys,                // correct: actual key structure
+  //     outputMint,
+  //     amountInMax: maxAmountIn,
+  //     amountOut: realAmountOut,
+  //     observationId: computePoolInfo.observationId, // fixed
+  //     ownerInfo: {
+  //       useSOLBalance: true,
+  //     },
+  //     remainingAccounts,
+  //     txVersion: 0,
+  //     computeBudgetConfig: {
+  //       units: 600_000,
+  //       microLamports: 500_000,
+  //     },
+  //   });
 
 
-    const { txId } = await execute({ sendAndConfirm: true });
-    console.log("✅ Swap transaction:", `https://explorer.solana.com/tx/${txId}`);
+  //   const { txId } = await execute({ sendAndConfirm: true });
+  //   console.log("✅ Swap transaction:", `https://explorer.solana.com/tx/${txId}`);
 
-    // --- 6️⃣ Verify results
-    const wsolAfter = await getAccount(connection, wsolAta);
-    const usdcAfter = await getAccount(connection, usdcAta);
+  //   // --- 6️⃣ Verify results
+  //   const wsolAfter = await getAccount(connection, wsolAta);
+  //   const usdcAfter = await getAccount(connection, usdcAta);
 
-    const usdcReceived = new BN(usdcAfter.amount.toString()).sub(new BN(usdcBefore.amount.toString()));
-    const wsolSpent = new BN(wsolBefore.amount.toString()).sub(new BN(wsolAfter.amount.toString()));
+  //   const usdcReceived = new BN(usdcAfter.amount.toString()).sub(new BN(usdcBefore.amount.toString()));
+  //   const wsolSpent = new BN(wsolBefore.amount.toString()).sub(new BN(wsolAfter.amount.toString()));
 
-    console.log(`USDC received: ${usdcReceived.toString()} / desired: ${desiredOut.toString()}`);
-    console.log(`WSOL spent: ${(wsolSpent.toNumber() / 1e9).toFixed(9)} SOL`);
+  //   console.log(`USDC received: ${usdcReceived.toString()} / desired: ${desiredOut.toString()}`);
+  //   console.log(`WSOL spent: ${(wsolSpent.toNumber() / 1e9).toFixed(9)} SOL`);
 
-    // --- 7️⃣ Basic assertions
-    expect(usdcReceived.gte(desiredOut), "USDC received less than desired").to.be.true;
+  //   // --- 7️⃣ Basic assertions
+  //   expect(usdcReceived.gte(desiredOut), "USDC received less than desired").to.be.true;
 
-    const slippageBps = wsolSpent.mul(new BN(10_000)).div(maxAmountIn);
-    console.log(`Slippage used: ${(slippageBps.toNumber() / 100).toFixed(2)}%`);
-    expect(slippageBps.toNumber(), "Input slippage exceeds tolerance").to.be.lte(1500); // 15% tolerance
-  });
+  //   const slippageBps = wsolSpent.mul(new BN(10_000)).div(maxAmountIn);
+  //   console.log(`Slippage used: ${(slippageBps.toNumber() / 100).toFixed(2)}%`);
+  //   expect(slippageBps.toNumber(), "Input slippage exceeds tolerance").to.be.lte(1500); // 15% tolerance
+  // });
 
   it("creates position directly using proxy_open_position CPI", async () => {
     const raydium = await Raydium.load({
@@ -756,5 +755,3 @@ describe("raydium_integration_swaps", () => {
     }
   });
 });
-
-

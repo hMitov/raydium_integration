@@ -1,14 +1,14 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::Token;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token_interface::{TokenAccount, Token2022, Mint};
 use anchor_spl::metadata::Metadata;
+use anchor_spl::token::Token;
+use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
 use raydium_amm_v3::{
     cpi,
     program::AmmV3,
     states::{
-        AmmConfig, ObservationState, PoolState, TickArrayState, POSITION_SEED, TICK_ARRAY_SEED
-    }
+        AmmConfig, ObservationState, PoolState, TickArrayState, POSITION_SEED, TICK_ARRAY_SEED,
+    },
 };
 
 declare_id!("FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ");
@@ -20,7 +20,8 @@ pub mod raydium_integration {
     use super::*;
 
     pub fn set_slippage(ctx: Context<SetSlippage>, bps: u16) -> Result<()> {
-        require!(bps <= 500, CustomError::InvalidSlippage); // Max 20%
+        require!(bps > 0, CustomError::InvalidSlippage);
+        require!(bps <= 500, CustomError::InvalidSlippage);   
         let user = &mut ctx.accounts.user_cfg;
         user.owner = ctx.accounts.owner.key();
         user.slippage_bps = bps;
@@ -34,13 +35,17 @@ pub mod raydium_integration {
         sqrt_price_limit_x64: u128,
         is_base_input: bool,
     ) -> Result<()> {
+        require!(amount > 0, CustomError::ZeroSwapAmount);
+        require!(expected_other_amount > 0, CustomError::InvalidExpectedAmount);
+    
         let user_cfg = &ctx.accounts.user_cfg;
-
         let bps = if user_cfg.slippage_bps == 0 {
             DEFAULT_SLIPPAGE_BPS
         } else {
             user_cfg.slippage_bps
         };
+
+        require!(bps > 0 && bps <= 500, CustomError::InvalidSlippage);
 
         let threshold = compute_slippage_threshold(expected_other_amount, bps, is_base_input);
 
@@ -65,10 +70,8 @@ pub mod raydium_integration {
             token_program: ctx.accounts.token_program.to_account_info(),
             tick_array: ctx.accounts.tick_array.to_account_info(),
         };
-        let cpi_context = CpiContext::new(
-            ctx.accounts.clmm_program.to_account_info(),
-            cpi_accounts
-        );
+        let cpi_context =
+            CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts);
         cpi::swap(
             cpi_context,
             amount,
@@ -90,6 +93,16 @@ pub mod raydium_integration {
         with_matedata: bool,
         base_flag: Option<bool>,
     ) -> Result<()> {
+        require!(
+            tick_lower_index < tick_upper_index,
+            CustomError::InvalidTickRange
+        );
+        require!(liquidity > 0, CustomError::ZeroLiquidity);
+        require!(
+            amount_0_max > 0 || amount_1_max > 0,
+            CustomError::ZeroDeposit
+        );
+
         let cpi_accounts = cpi::accounts::OpenPositionV2 {
             payer: ctx.accounts.payer.to_account_info(),
             position_nft_owner: ctx.accounts.position_nft_owner.to_account_info(),
@@ -114,8 +127,9 @@ pub mod raydium_integration {
             vault_0_mint: ctx.accounts.vault_0_mint.to_account_info(),
             vault_1_mint: ctx.accounts.vault_1_mint.to_account_info(),
         };
-        let cpi_context = CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts)
-            .with_remaining_accounts(ctx.remaining_accounts.to_vec());
+        let cpi_context =
+            CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts)
+                .with_remaining_accounts(ctx.remaining_accounts.to_vec());
         cpi::open_position_v2(
             cpi_context,
             tick_lower_index,
@@ -346,7 +360,6 @@ impl UserConfig {
     pub const SIZE: usize = 32 + 2;
 }
 
-
 fn compute_slippage_threshold(expected: u64, bps: u16, is_base_input: bool) -> u64 {
     if is_base_input {
         // minimum output = expected * (1 - bps / 10_000)
@@ -361,4 +374,22 @@ fn compute_slippage_threshold(expected: u64, bps: u16, is_base_input: bool) -> u
 pub enum CustomError {
     #[msg("Invalid slippage basis points")]
     InvalidSlippage,
+
+    #[msg("Invalid tick range")]
+    InvalidTickRange,
+
+    #[msg("Zero liquidity")]
+    ZeroLiquidity,
+
+    #[msg("Zero deposit")]
+    ZeroDeposit,
+
+    #[msg("Invalid vault")]
+    InvalidVault,
+
+    #[msg("Zero swap amount")]
+    ZeroSwapAmount,
+
+    #[msg("Invalid expected amount")]
+    InvalidExpectedAmount,
 }
