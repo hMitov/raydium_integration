@@ -553,12 +553,17 @@ describe("raydium_integration_swaps", () => {
     // tokenAccount0 must match vault_0.mint, tokenAccount1 must match vault_1.mint
     const tokenAccount0 = mintA.equals(INPUT_VAULT_MINT) ? wsolAta : usdcAta;
     const tokenAccount1 = mintB.equals(OUTPUT_VAULT_MINT) ? usdcAta : wsolAta;
-
+    
     // === Extra compute (optional)
+    const memoIx = SystemProgram.transfer({
+      fromPubkey: wallet,
+      toPubkey: wallet,
+      lamports: 0,
+    });
     const computeIx = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 });
 
     // === CPI into CLMM via your proxy
-    const txSig = await program.methods
+    const tx = await program.methods
       .proxyOpenPosition(
         tickLower,
         tickUpper,
@@ -569,8 +574,7 @@ describe("raydium_integration_swaps", () => {
         amount1Max,
         true,   // with metadata
         null    // base_flag
-      )
-      .preInstructions([computeIx])
+      ).preInstructions([memoIx, computeIx])
       .accountsStrict({
         clmmProgram: CLMM_PROGRAM,
         payer: wallet,
@@ -595,11 +599,19 @@ describe("raydium_integration_swaps", () => {
         tokenProgram2022: TOKEN_2022_PROGRAM_ID,
         vault0Mint: mintA,
         vault1Mint: mintB,
-      })
-      .signers([positionNftMint])
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      }).transaction();
 
-    console.log("proxy_open_position executed:", txSig);
+    const { blockhash, lastValidBlockHeight } = await provider.connection.getLatestBlockhash("finalized");
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = wallet;
+    tx.sign(positionNftMint);
+
+    const txSig = await provider.sendAndConfirm(tx, [positionNftMint], {
+      skipPreflight: false,
+      commitment: "confirmed",
+    });
+    
+    console.log("proxy_open_position executed:", tx);
   });
 
   it("increases liquidity", async () => {
