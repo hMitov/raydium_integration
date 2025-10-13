@@ -11,9 +11,10 @@ use raydium_amm_v3::{
     },
 };
 
-declare_id!("FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ");
+declare_id!("EgVzMskheVJTgMRuWRxfxae9JjfA8Ernjx77NgGHoNzT");
 
 pub const DEFAULT_SLIPPAGE_BPS: u16 = 500;
+
 
 #[program]
 pub mod raydium_integration {
@@ -25,6 +26,13 @@ pub mod raydium_integration {
         let user = &mut ctx.accounts.user_cfg;
         user.owner = ctx.accounts.owner.key();
         user.slippage_bps = bps;
+        
+        emit!(SlippageSet {
+            owner: ctx.accounts.owner.key(),
+            slippage_bps: bps,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+        
         Ok(())
     }
 
@@ -78,7 +86,20 @@ pub mod raydium_integration {
             threshold,
             sqrt_price_limit_x64,
             is_base_input,
-        )
+        )?;
+
+        emit!(SwapExecuted {
+            user: ctx.accounts.payer.key(),
+            pool: ctx.accounts.pool_state.key(),
+            amount_in: amount,
+            amount_out: expected_other_amount,
+            expected_amount: expected_other_amount,
+            slippage_bps: bps,
+            is_base_input,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
     }
 
     pub fn proxy_open_position<'a, 'b, 'c: 'info, 'info>(
@@ -141,8 +162,23 @@ pub mod raydium_integration {
             amount_1_max,
             with_matedata,
             base_flag,
-        )
+        )?;
+
+        emit!(PositionOpened {
+            user: ctx.accounts.payer.key(),
+            pool: ctx.accounts.pool_state.key(),
+            position_nft: ctx.accounts.position_nft_mint.key(),
+            tick_lower: tick_lower_index,
+            tick_upper: tick_upper_index,
+            liquidity,
+            amount_0: amount_0_max,
+            amount_1: amount_1_max,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
     }
+
 }
 
 #[derive(Accounts)]
@@ -215,6 +251,7 @@ pub struct ProxyOpenPosition<'info> {
     /// Pays to mint the position
     #[account(mut)]
     pub payer: Signer<'info>,
+
 
     /// CHECK: Receives the position NFT
     pub position_nft_owner: UncheckedAccount<'info>,
@@ -392,4 +429,57 @@ pub enum CustomError {
 
     #[msg("Invalid expected amount")]
     InvalidExpectedAmount,
+}
+
+
+#[event]
+pub struct SlippageSet {
+    pub owner: Pubkey,
+    pub slippage_bps: u16,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct SwapExecuted {
+    pub user: Pubkey,
+    pub pool: Pubkey,
+    pub amount_in: u64,
+    pub amount_out: u64,
+    pub expected_amount: u64,
+    pub slippage_bps: u16,
+    pub is_base_input: bool,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct PositionOpened {
+    pub user: Pubkey,
+    pub pool: Pubkey,
+    pub position_nft: Pubkey,
+    pub tick_lower: i32,
+    pub tick_upper: i32,
+    pub liquidity: u128,
+    pub amount_0: u64,
+    pub amount_1: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct LiquidityIncreased {
+    pub user: Pubkey,
+    pub position_nft: Pubkey,
+    pub liquidity_added: u128,
+    pub amount_0_added: u64,
+    pub amount_1_added: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct LiquidityDecreased {
+    pub user: Pubkey,
+    pub position_nft: Pubkey,
+    pub liquidity_removed: u128,
+    pub amount_0_removed: u64,
+    pub amount_1_removed: u64,
+    pub timestamp: i64,
 }

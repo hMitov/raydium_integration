@@ -10,11 +10,10 @@ import {
     createSyncNativeInstruction,
     getAccount,
     createAssociatedTokenAccountInstruction,
-    NATIVE_MINT
 } from "@solana/spl-token";
 import BN from "bn.js";
 import * as pkg from '@raydium-io/raydium-sdk-v2';
-const { Raydium, PoolUtils} = pkg;
+const { Raydium, PoolUtils } = pkg;
 
 export interface PoolSelectionResult {
     bestPool: any;
@@ -22,6 +21,7 @@ export interface PoolSelectionResult {
     bestRate: number;
     poolKeys: any;
 }
+
 const CLMM_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 
 /**
@@ -80,9 +80,9 @@ export async function findOptimalPoolExactIn(
         const raydium = await Raydium.load({ connection, owner: wallet, disableLoadToken: true });
 
         // Fetch all CLMM pools for this pair
-        const poolData = await raydium.api.fetchPoolByMints({ 
-            mint1: mintA.toBase58(), 
-            mint2: mintB.toBase58() 
+        const poolData = await raydium.api.fetchPoolByMints({
+            mint1: mintA.toBase58(),
+            mint2: mintB.toBase58()
         });
         const poolList = Array.isArray(poolData) ? poolData : (poolData as any).data || [];
         const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM);
@@ -182,6 +182,7 @@ export async function findOptimalPoolExactOut(
         mint2: mintB.toBase58(),
     });
     const poolList = Array.isArray(poolData) ? poolData : (poolData as any).data || [];
+    // const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM && p.id == "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn");
     const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM);
 
     if (clmmPools.length === 0) {
@@ -203,8 +204,8 @@ export async function findOptimalPoolExactOut(
                 continue;
             }
 
-            const outputMint = isMintAOutput 
-                ? new PublicKey(poolInfo.mintA.address) 
+            const outputMint = isMintAOutput
+                ? new PublicKey(poolInfo.mintA.address)
                 : new PublicKey(poolInfo.mintB.address);
 
             // Compute required input for exact output
@@ -258,4 +259,5 @@ export async function findOptimalPoolExactOut(
         realAmountOut: best.realAmountOut,
         remainingAccounts: best.remainingAccounts,
     };
+
 }

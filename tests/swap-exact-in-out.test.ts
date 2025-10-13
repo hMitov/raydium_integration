@@ -17,7 +17,7 @@ import {
 import { RaydiumIntegration } from "../target/types/raydium_integration";
 import { ensureTokenAccount, wrapSolToWsol, findOptimalPoolExactIn, findOptimalPoolExactOut } from "./utils/swap-utils";
 import { expect } from "chai";
-import { PoolUtils, Raydium, TickUtils, getPdaTickArrayAddress, getPdaProtocolPositionAddress, getPdaPersonalPositionAddress, TxVersion } from "@raydium-io/raydium-sdk-v2";
+import { PoolUtils, Raydium, TickUtils, getPdaTickArrayAddress, getPdaProtocolPositionAddress, getPdaPersonalPositionAddress, TxVersion, ClmmKeys, ApiV3PoolInfoConcentratedItem } from "@raydium-io/raydium-sdk-v2";
 
 export async function getCorrectNftAta(
   connection: Connection,
@@ -44,11 +44,6 @@ export async function getCorrectNftAta(
 }
 
 describe("raydium_integration_swaps", () => {
-  const provider = anchor.AnchorProvider.env();
-  anchor.setProvider(provider);
-  const program = anchor.workspace.RaydiumIntegration as Program<RaydiumIntegration>;
-  const wallet = provider.wallet.publicKey;
-
   // Raydium CLMM mainnet constants
   const CLMM_PROGRAM = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
   const POOL_STATE = new PublicKey("3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv");
@@ -63,6 +58,23 @@ describe("raydium_integration_swaps", () => {
   const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
   const SYSVAR_RENT_PUBKEY = new PublicKey("SysvarRent111111111111111111111111111111111");
   const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+  let raydium: Raydium;
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+  const program = anchor.workspace.RaydiumIntegration as Program<RaydiumIntegration>;
+  const wallet = provider.wallet.publicKey;
+
+  before(async () => {
+    console.log("⚙️ Initializing test state...");
+    raydium = await Raydium.load({
+      connection: provider.connection,
+      owner: provider.wallet.payer,
+      disableLoadToken: true,
+    });
+
+    await new Promise(r => setTimeout(r, 2000));
+  });
 
   // PDA for user config
   const [USER_CFG] = PublicKey.findProgramAddressSync(
@@ -165,7 +177,7 @@ describe("raydium_integration_swaps", () => {
     const usdcBefore = await getAccount(provider.connection, usdcAta);
 
     // Get pool data for tick array calculation
-    const raydium = await Raydium.load({ connection: provider.connection, owner: wallet, disableLoadToken: true });
+    // const raydium = await Raydium.load({ connection: provider.connection, owner: wallet, disableLoadToken: true });
     const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
 
     const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
@@ -241,7 +253,7 @@ describe("raydium_integration_swaps", () => {
     console.log("bestPool.ammConfig", bestPool.ammConfig);
 
     // Load the pool data to get current tick information
-    const raydium = await Raydium.load({ connection: provider.connection, owner: wallet, disableLoadToken: true });
+    // const raydium = await Raydium.load({ connection: provider.connection, owner: wallet, disableLoadToken: true });
     const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(bestPool.id);
 
     const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
@@ -483,287 +495,255 @@ describe("raydium_integration_swaps", () => {
   //   expect(slippageBps.toNumber(), "Input slippage exceeds tolerance").to.be.lte(1500); // 15% tolerance
   // });
 
-  it("creates position directly using proxy_open_position CPI", async () => {
-    const raydium = await Raydium.load({
-      connection: provider.connection,
-      owner: provider.wallet.payer,
-      disableLoadToken: true,
-    });
+  describe("liquidity position management", () => {
+    before(async () => {
 
-    // === Load pool ===
-    const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
-    const poolId = new PublicKey(poolKeys.id);
+      // === Load pool ===
+      const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
+      const poolId = new PublicKey(poolKeys.id);
 
-    // === Ensure ATAs & fund WSOL ===
-    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
-    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
-    await wrapSolToWsol(provider, wallet, wsolAta, 0.5);
+      const ownerPositions = await raydium.clmm.getOwnerPositionInfo({
+        owner: provider.wallet.publicKey,
+        programId: poolInfo.programId,
+      });
 
-    // === Tick range ===
-    const tickSpacing: number = (poolInfo as any).tickSpacing;
-    const currentTick: number = (poolInfo as any).tickCurrent;
-    const tickLower = currentTick - tickSpacing * 10;
-    const tickUpper = currentTick + tickSpacing * 10;
+      if (ownerPositions.length === 0) {
 
-    // Correct tick-array starts via SDK
-    const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndexByTick(tickLower, tickSpacing);
-    const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndexByTick(tickUpper, tickSpacing);
+        // === Ensure ATAs & fund WSOL ===
+        const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
+        const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+        await wrapSolToWsol(provider, wallet, wsolAta, 0.5);
 
-    // Liquidity
-    const baseAmount = 0.1;
-    const epochInfo = await raydium.fetchEpochInfo();
-    const quote = await PoolUtils.getLiquidityAmountOutFromAmountIn({
-      poolInfo,
-      slippage: 0,
-      inputA: true,
-      tickUpper: Math.max(tickLower, tickUpper),
-      tickLower: Math.min(tickLower, tickUpper),
-      amount: new BN(baseAmount * 10 ** poolInfo.mintA.decimals),
-      add: true,
-      amountHasFee: true,
-      epochInfo,
-    });
-    const liquidity = quote.liquidity;
-    const amount0Max = new BN(baseAmount * 10 ** poolInfo.mintA.decimals);
-    const amount1Max = new BN(quote.amountSlippageB.amount.toString());
+        // === Tick range ===
+        const tickSpacing: number = (poolInfo as any).tickSpacing;
+        const currentTick: number = (poolInfo as any).tickCurrent;
+        const tickLower = currentTick - tickSpacing * 10;
+        const tickUpper = currentTick + tickSpacing * 10;
 
-    // PDAs (CLMM program id)
-    const { publicKey: tickArrayLower } = getPdaTickArrayAddress(CLMM_PROGRAM, poolId, tickArrayLowerStartIndex);
-    const { publicKey: tickArrayUpper } = getPdaTickArrayAddress(CLMM_PROGRAM, poolId, tickArrayUpperStartIndex);
-    const { publicKey: protocolPosition } = getPdaProtocolPositionAddress(CLMM_PROGRAM, poolId, tickLower, tickUpper);
+        // Correct tick-array starts via SDK
+        const tickArrayLowerStartIndex = TickUtils.getTickArrayStartIndexByTick(tickLower, tickSpacing);
+        const tickArrayUpperStartIndex = TickUtils.getTickArrayStartIndexByTick(tickUpper, tickSpacing);
 
-    //   NFT mint / personal position
-    const positionNftMint = Keypair.generate();
-    const { publicKey: personalPosition } = getPdaPersonalPositionAddress(
-      CLMM_PROGRAM,
-      positionNftMint.publicKey
-    );
-    const positionNftAccount = getAssociatedTokenAddressSync(positionNftMint.publicKey, wallet);
-    const [metadataAccount] = PublicKey.findProgramAddressSync(
-      [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), positionNftMint.publicKey.toBuffer()],
-      METADATA_PROGRAM_ID
-    );
+        // Liquidity
+        const baseAmount = 0.1;
+        const epochInfo = await raydium.fetchEpochInfo();
+        const quote = await PoolUtils.getLiquidityAmountOutFromAmountIn({
+          poolInfo,
+          slippage: 0,
+          inputA: true,
+          tickUpper: Math.max(tickLower, tickUpper),
+          tickLower: Math.min(tickLower, tickUpper),
+          amount: new BN(baseAmount * 10 ** poolInfo.mintA.decimals),
+          add: true,
+          amountHasFee: true,
+          epochInfo,
+        });
+        const liquidity = quote.liquidity;
+        const amount0Max = new BN(baseAmount * 10 ** poolInfo.mintA.decimals);
+        const amount1Max = new BN(quote.amountSlippageB.amount.toString());
 
-    // Map token accounts to vaults by mint order (A/B)
-    const mintA = new PublicKey((poolInfo as any).mintA.address);
-    const mintB = new PublicKey((poolInfo as any).mintB.address);
-    const tokenVault0 = INPUT_VAULT;  // Use hardcoded vault addresses
-    const tokenVault1 = OUTPUT_VAULT;
+        // PDAs (CLMM program id)
+        const { publicKey: tickArrayLower } = getPdaTickArrayAddress(CLMM_PROGRAM, poolId, tickArrayLowerStartIndex);
+        const { publicKey: tickArrayUpper } = getPdaTickArrayAddress(CLMM_PROGRAM, poolId, tickArrayUpperStartIndex);
+        const { publicKey: protocolPosition } = getPdaProtocolPositionAddress(CLMM_PROGRAM, poolId, tickLower, tickUpper);
 
-    // tokenAccount0 must match vault_0.mint, tokenAccount1 must match vault_1.mint
-    const tokenAccount0 = mintA.equals(INPUT_VAULT_MINT) ? wsolAta : usdcAta;
-    const tokenAccount1 = mintB.equals(OUTPUT_VAULT_MINT) ? usdcAta : wsolAta;
-    
-    // === Extra compute (optional)
-    const memoIx = SystemProgram.transfer({
-      fromPubkey: wallet,
-      toPubkey: wallet,
-      lamports: 0,
-    });
-    const computeIx = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 });
+        //   NFT mint / personal position
+        const positionNftMint = Keypair.generate();
+        const { publicKey: personalPosition } = getPdaPersonalPositionAddress(
+          CLMM_PROGRAM,
+          positionNftMint.publicKey
+        );
+        const positionNftAccount = getAssociatedTokenAddressSync(positionNftMint.publicKey, wallet);
+        const [metadataAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), positionNftMint.publicKey.toBuffer()],
+          METADATA_PROGRAM_ID
+        );
 
-    // === CPI into CLMM via your proxy
-    const tx = await program.methods
-      .proxyOpenPosition(
-        tickLower,
-        tickUpper,
-        tickArrayLowerStartIndex,
-        tickArrayUpperStartIndex,
-        liquidity,
-        amount0Max,
-        amount1Max,
-        true,   // with metadata
-        null    // base_flag
-      ).preInstructions([memoIx, computeIx])
-      .accountsStrict({
-        clmmProgram: CLMM_PROGRAM,
-        payer: wallet,
-        positionNftOwner: wallet,
-        positionNftMint: positionNftMint.publicKey,
-        positionNftAccount,
-        metadataAccount,
-        poolState: poolId,
-        protocolPosition,
-        tickArrayLower,
-        tickArrayUpper,
-        personalPosition,
-        tokenAccount0,
-        tokenAccount1,
-        tokenVault0,
-        tokenVault1,
-        rent: SYSVAR_RENT_PUBKEY,
-        systemProgram: SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        metadataProgram: METADATA_PROGRAM_ID,
-        tokenProgram2022: TOKEN_2022_PROGRAM_ID,
-        vault0Mint: mintA,
-        vault1Mint: mintB,
-      }).transaction();
+        // Map token accounts to vaults by mint order (A/B)
+        const mintA = new PublicKey((poolInfo as any).mintA.address);
+        const mintB = new PublicKey((poolInfo as any).mintB.address);
+        const tokenVault0 = INPUT_VAULT;  // Use hardcoded vault addresses
+        const tokenVault1 = OUTPUT_VAULT;
 
-    const { blockhash, lastValidBlockHeight } = await provider.connection.getLatestBlockhash("finalized");
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = wallet;
-    tx.sign(positionNftMint);
+        // tokenAccount0 must match vault_0.mint, tokenAccount1 must match vault_1.mint
+        const tokenAccount0 = mintA.equals(INPUT_VAULT_MINT) ? wsolAta : usdcAta;
+        const tokenAccount1 = mintB.equals(OUTPUT_VAULT_MINT) ? usdcAta : wsolAta;
 
-    const txSig = await provider.sendAndConfirm(tx, [positionNftMint], {
-      skipPreflight: false,
-      commitment: "confirmed",
-    });
-    
-    console.log("proxy_open_position executed:", tx);
-  });
+        // === Extra compute (optional)
+        const memoIx = SystemProgram.transfer({
+          fromPubkey: wallet,
+          toPubkey: wallet,
+          lamports: 0,
+        });
+        const computeIx = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 });
 
-  it("increases liquidity", async () => {
-    const raydium = await Raydium.load({
-      connection: provider.connection,
-      owner: provider.wallet.payer,
-      disableLoadToken: true,
-    });
+        // === CPI into CLMM via your proxy
+        const tx = await program.methods
+          .proxyOpenPosition(
+            tickLower,
+            tickUpper,
+            tickArrayLowerStartIndex,
+            tickArrayUpperStartIndex,
+            liquidity,
+            amount0Max,
+            amount1Max,
+            true,   // with metadata
+            null    // base_flag
+          ).preInstructions([memoIx, computeIx])
+          .accountsStrict({
+            clmmProgram: CLMM_PROGRAM,
+            payer: wallet,
+            positionNftOwner: wallet,
+            positionNftMint: positionNftMint.publicKey,
+            positionNftAccount,
+            metadataAccount,
+            poolState: poolId,
+            protocolPosition,
+            tickArrayLower,
+            tickArrayUpper,
+            personalPosition,
+            tokenAccount0,
+            tokenAccount1,
+            tokenVault0,
+            tokenVault1,
+            rent: SYSVAR_RENT_PUBKEY,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            metadataProgram: METADATA_PROGRAM_ID,
+            tokenProgram2022: TOKEN_2022_PROGRAM_ID,
+            vault0Mint: mintA,
+            vault1Mint: mintB,
+          }).transaction();
 
-    // === Load pool ===
-    const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
-    console.log("Loaded pool:", poolKeys.id);
+        const { blockhash, lastValidBlockHeight } = await provider.connection.getLatestBlockhash("finalized");
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = wallet;
+        tx.sign(positionNftMint);
 
-    // === Find the existing position created in the previous test ===
-    const ownerPositions = await raydium.clmm.getOwnerPositionInfo({
-      owner: provider.wallet.publicKey,
-      programId: poolInfo.programId,
-    });
-
-    if (ownerPositions.length === 0) {
-      throw new Error("No existing position found. Run proxy_open_position test first!");
-    }
-
-    // Pick the first position from this pool
-    const existing = ownerPositions.find(p =>
-      new PublicKey(p.poolId).equals(new PublicKey(poolInfo.id))
-    );
-
-    if (!existing) {
-      throw new Error("No existing position for this pool.");
-    }
-
-    console.log("Reusing position NFT:", existing.nftMint.toBase58());
-    console.log("Tick range:", existing.tickLower, existing.tickUpper);
-
-    const nftMint = existing.nftMint;
-    const tickLower = existing.tickLower;
-    const tickUpper = existing.tickUpper;
-
-    // === Ensure ATAs for wallet ===
-    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
-    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
-
-    // === Prepare to add liquidity ===
-    const baseInitAmount = 0.05; // add another 0.05 SOL
-    const epochInfo = await raydium.fetchEpochInfo();
-
-    const liqCalc = await PoolUtils.getLiquidityAmountOutFromAmountIn({
-      poolInfo,
-      slippage: 0,
-      inputA: true,
-      tickUpper,
-      tickLower,
-      amount: new BN(baseInitAmount * 10 ** poolInfo.mintA.decimals),
-      add: true,
-      amountHasFee: true,
-      epochInfo,
-    });
-
-    const { execute: executeIncrease } = await raydium.clmm.increasePositionFromLiquidity({
-      poolInfo,
-      poolKeys,
-      ownerPosition: {
-        poolId: poolInfo.id,
-        nftMint,
-        tickLower,
-        tickUpper,
-      },
-      ownerInfo: {
-        useSOLBalance: true,
-        feePayer: provider.wallet.publicKey,
-      },
-      liquidity: liqCalc.liquidity,
-      amountMaxA: new BN(baseInitAmount * 10 ** poolInfo.mintA.decimals),
-      amountMaxB: new BN(new Decimal(liqCalc.amountSlippageB.amount.toString()).mul(1.05).toFixed(0)),
-      txVersion: TxVersion.LEGACY,
-      nft2022: true,
-    });
-
-    const { txId } = await executeIncrease({ sendAndConfirm: true });
-    console.log("Increased liquidity in existing position:", { txId });
-
-    await new Promise(r => setTimeout(r, 4000));
-  });
-
-
-  it("decreases liquidity from Raydium CLMM", async () => {
-    const raydium = await Raydium.load({
-      connection: provider.connection,
-      owner: provider.wallet.payer,
-      disableLoadToken: true,
-    });
-
-    // Load Pool Info
-    const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
-    console.log("Loaded pool:", poolKeys.id);
-
-    // Check if we already have a position for this pool
-    const existingPositions = await raydium.clmm.getOwnerPositionInfo({
-      programId: poolInfo.programId,
-    });
-
-    const existingPosition = existingPositions.find((p) => p.poolId.toBase58() === poolInfo.id);
-    if (existingPosition) {
-      return;
-    }
-
-    console.log("Decreasing liquidity for position:", existingPosition.nftMint.toBase58());
-    console.log("Current liquidity:", existingPosition.liquidity.toString());
-
-    // ====== 3️⃣ Build the decrease tx ======
-    const { execute } = await raydium.clmm.decreaseLiquidity({
-      poolInfo,
-      poolKeys,
-      ownerPosition: existingPosition,
-      ownerInfo: {
-        useSOLBalance: true,
-        // set closePosition to true to withdraw everything & burn NFT
-        closePosition: false, // or true if you want full withdrawal
-        feePayer: raydium.owner.publicKey,
-      },
-      // Remove half liquidity (or all if closePosition: true)
-      liquidity: existingPosition.liquidity.divn(2),
-      amountMinA: new BN(0),
-      amountMinB: new BN(0),
-      txVersion: TxVersion.LEGACY,
-    });
-
-    try {
-      await raydium.connection.getLatestBlockhash("finalized");
-
-      const { txId } = await execute({ sendAndConfirm: true });
-    } catch (e: any) {
-      if (e.message.includes("already been processed")) {
-        console.log("⚠️ Transaction already processed, skipping resend");
-      } else {
-        throw e;
+        const txSig = await provider.sendAndConfirm(tx, [positionNftMint], {
+          skipPreflight: false,
+          commitment: "confirmed",
+        });
       }
-    }
-
-    // Get updated position info using the correct method
-    const updatedPositions = await raydium.clmm.getOwnerPositionInfo({
-      programId: poolInfo.programId,
     });
 
-    const updatedPosition = updatedPositions.find((p) => p.nftMint.toBase58() === existingPosition.nftMint.toBase58());
-    if (updatedPosition) {
-      // Verify liquidity increased
-      expect(updatedPosition.liquidity.gt(existingPosition.liquidity), "Liquidity did not increase as expected");
-    }
-    else {
-      throw new Error("Could not find updated position info");
-    }
+    it("increases liquidity", async () => {
+      // === Load pool ===
+      const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
+      console.log("Loaded pool:", poolKeys.id);
+
+      // === Find the existing position created in the previous test ===
+      const ownerPositions = await raydium.clmm.getOwnerPositionInfo({
+        owner: provider.wallet.publicKey,
+        programId: poolInfo.programId,
+      });
+
+      if (ownerPositions.length === 0) {
+        throw new Error("No existing position found. Run proxy_open_position test first!");
+      }
+
+      // Pick the first position from this pool
+      const existing = ownerPositions.find(p =>
+        new PublicKey(p.poolId).equals(new PublicKey(poolInfo.id))
+      );
+
+      if (!existing) {
+        throw new Error("No existing position for this pool.");
+      }
+
+      console.log("Reusing position NFT:", existing.nftMint.toBase58());
+      console.log("Tick range:", existing.tickLower, existing.tickUpper);
+
+      const nftMint = existing.nftMint;
+      const tickLower = existing.tickLower;
+      const tickUpper = existing.tickUpper;
+
+      // === Ensure ATAs for wallet ===
+      const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
+      const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
+
+      // === Prepare to add liquidity ===
+      const baseInitAmount = 0.05; // add another 0.05 SOL
+      const epochInfo = await raydium.fetchEpochInfo();
+
+      const liqCalc = await PoolUtils.getLiquidityAmountOutFromAmountIn({
+        poolInfo,
+        slippage: 0,
+        inputA: true,
+        tickUpper,
+        tickLower,
+        amount: new BN(baseInitAmount * 10 ** poolInfo.mintA.decimals),
+        add: true,
+        amountHasFee: true,
+        epochInfo,
+      });
+
+      const { execute: executeIncrease } = await raydium.clmm.increasePositionFromLiquidity({
+        poolInfo,
+        poolKeys,
+        ownerPosition: {
+          poolId: poolInfo.id,
+          nftMint,
+          tickLower,
+          tickUpper,
+        },
+        ownerInfo: {
+          useSOLBalance: true,
+          feePayer: provider.wallet.publicKey,
+        },
+        liquidity: liqCalc.liquidity,
+        amountMaxA: new BN(baseInitAmount * 10 ** poolInfo.mintA.decimals),
+        amountMaxB: new BN(new Decimal(liqCalc.amountSlippageB.amount.toString()).mul(1.05).toFixed(0)),
+        txVersion: TxVersion.LEGACY,
+        nft2022: true,
+      });
+
+      const { txId } = await executeIncrease({ sendAndConfirm: true });
+      console.log("Increased liquidity in existing position:", { txId });
+
+      await new Promise(r => setTimeout(r, 4000));
+    });
+
+
+    it("decreases liquidity from Raydium CLMM", async () => {
+      let poolInfo: ApiV3PoolInfoConcentratedItem
+      let poolKeys: ClmmKeys | undefined
+      const data = await raydium.api.fetchPoolById({ ids: POOL_STATE.toBase58() })
+      poolInfo = data[0] as ApiV3PoolInfoConcentratedItem
+
+      // Check if we already have a position for this pool
+      const existingPositions = await raydium.clmm.getOwnerPositionInfo({
+        programId: poolInfo.programId,
+      });
+      if (!existingPositions.length) throw new Error('user do not have any positions')
+
+      const existingPosition = existingPositions.find((p) => p.poolId.toBase58() === poolInfo.id);
+      if (!existingPosition) throw new Error(`user do not have position in pool: ${poolInfo.id}`)
+
+      console.log("Decreasing liquidity for position:", existingPosition.nftMint.toBase58());
+      console.log("Current liquidity:", existingPosition.liquidity.toString());
+
+      // ====== 3️⃣ Build the decrease tx ======
+      const { execute } = await raydium.clmm.decreaseLiquidity({
+        poolInfo,
+        poolKeys,
+        ownerPosition: existingPosition,
+        ownerInfo: {
+          useSOLBalance: true,
+          // set closePosition to true to withdraw everything & burn NFT
+          closePosition: false, // or true if you want full withdrawal
+        },
+        // Remove half liquidity (or all if closePosition: true)
+        liquidity: existingPosition.liquidity.divn(2),
+        amountMinA: new BN(0),
+        amountMinB: new BN(0),
+        txVersion: TxVersion.LEGACY,
+      });
+
+      const { txId } = await execute({ sendAndConfirm: true })
+      console.log('withdraw liquidity from clmm position:', { txId: `https://explorer.solana.com/tx/${txId}` })
+      process.exit() // if you don't want to end up node execution, comment 
+    });
   });
 });
