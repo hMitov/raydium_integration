@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-raydium_integration = "FNTPyRGBAC1vdEB7N4PDST2At8ACyc8aSZks1znvVNeZ"
+raydium_integration = "EgVzMskheVJTgMRuWRxfxae9JjfA8Ernjx77NgGHoNzT"
 
 [registry]
 url = "https://api.apr.dev"
