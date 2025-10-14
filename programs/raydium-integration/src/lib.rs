@@ -15,27 +15,32 @@ declare_id!("EgVzMskheVJTgMRuWRxfxae9JjfA8Ernjx77NgGHoNzT");
 
 pub const DEFAULT_SLIPPAGE_BPS: u16 = 500;
 
-
 #[program]
 pub mod raydium_integration {
     use super::*;
 
+    /*
+     * Set slippage for a user, default is 5%
+     */
     pub fn set_slippage(ctx: Context<SetSlippage>, bps: u16) -> Result<()> {
         require!(bps > 0, CustomError::InvalidSlippage);
-        require!(bps <= 500, CustomError::InvalidSlippage);   
+        require!(bps <= 500, CustomError::InvalidSlippage);
         let user = &mut ctx.accounts.user_cfg;
         user.owner = ctx.accounts.owner.key();
         user.slippage_bps = bps;
-        
+
         emit!(SlippageSet {
             owner: ctx.accounts.owner.key(),
             slippage_bps: bps,
             timestamp: Clock::get()?.unix_timestamp,
         });
-        
+
         Ok(())
     }
 
+    /*
+     * Swap tokens using Raydium CLMM, exact in or out
+     */
     pub fn proxy_swap(
         ctx: Context<ProxySwap>,
         amount: u64,
@@ -44,8 +49,11 @@ pub mod raydium_integration {
         is_base_input: bool,
     ) -> Result<()> {
         require!(amount > 0, CustomError::ZeroSwapAmount);
-        require!(expected_other_amount > 0, CustomError::InvalidExpectedAmount);
-    
+        require!(
+            expected_other_amount > 0,
+            CustomError::InvalidExpectedAmount
+        );
+
         let user_cfg = &ctx.accounts.user_cfg;
         let bps = if user_cfg.slippage_bps == 0 {
             DEFAULT_SLIPPAGE_BPS
@@ -66,6 +74,7 @@ pub mod raydium_integration {
             is_base_input
         );
 
+        // Build CPI to Raydium AMM v3
         let cpi_accounts = cpi::accounts::SwapSingle {
             payer: ctx.accounts.payer.to_account_info(),
             amm_config: ctx.accounts.amm_config.to_account_info(),
@@ -78,6 +87,8 @@ pub mod raydium_integration {
             token_program: ctx.accounts.token_program.to_account_info(),
             tick_array: ctx.accounts.tick_array.to_account_info(),
         };
+
+        // Build CPI context
         let cpi_context =
             CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts);
         cpi::swap(
@@ -102,6 +113,9 @@ pub mod raydium_integration {
         Ok(())
     }
 
+    /*
+     * Open a position using Raydium CLMM,
+     */
     pub fn proxy_open_position<'a, 'b, 'c: 'info, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, ProxyOpenPosition<'info>>,
         tick_lower_index: i32,
@@ -124,6 +138,7 @@ pub mod raydium_integration {
             CustomError::ZeroDeposit
         );
 
+        // Build CPI accounts
         let cpi_accounts = cpi::accounts::OpenPositionV2 {
             payer: ctx.accounts.payer.to_account_info(),
             position_nft_owner: ctx.accounts.position_nft_owner.to_account_info(),
@@ -148,9 +163,13 @@ pub mod raydium_integration {
             vault_0_mint: ctx.accounts.vault_0_mint.to_account_info(),
             vault_1_mint: ctx.accounts.vault_1_mint.to_account_info(),
         };
+
+        // Build CPI context
         let cpi_context =
             CpiContext::new(ctx.accounts.clmm_program.to_account_info(), cpi_accounts)
                 .with_remaining_accounts(ctx.remaining_accounts.to_vec());
+
+        // Execute CPI
         cpi::open_position_v2(
             cpi_context,
             tick_lower_index,
@@ -178,8 +197,11 @@ pub mod raydium_integration {
 
         Ok(())
     }
-
 }
+
+/*
+ * ACCOUNT STRUCTS
+ */
 
 #[derive(Accounts)]
 pub struct SetSlippage<'info> {
@@ -199,7 +221,6 @@ pub struct SetSlippage<'info> {
 #[derive(Accounts)]
 pub struct ProxySwap<'info> {
     pub clmm_program: Program<'info, AmmV3>,
-    /// The user performing the swap
     pub payer: Signer<'info>,
 
     #[account(
@@ -208,38 +229,29 @@ pub struct ProxySwap<'info> {
     )]
     pub user_cfg: Account<'info, UserConfig>,
 
-    /// The factory state to read protocol fees
     #[account(address = pool_state.load()?.amm_config)]
     pub amm_config: Box<Account<'info, AmmConfig>>,
 
-    /// The program account of the pool in which the swap will be performed
     #[account(mut)]
     pub pool_state: AccountLoader<'info, PoolState>,
 
-    /// The user token account for input token
     #[account(mut)]
     pub input_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The user token account for output token
     #[account(mut)]
     pub output_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The vault token account for input token
     #[account(mut)]
     pub input_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The vault token account for output token
     #[account(mut)]
     pub output_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The program account for the most recent oracle observation
     #[account(mut, address = pool_state.load()?.observation_key)]
     pub observation_state: AccountLoader<'info, ObservationState>,
 
-    /// SPL program for token transfers
     pub token_program: Program<'info, Token>,
 
-    /// The tick array account for the swap
     #[account(mut, constraint = tick_array.load()?.pool_id == pool_state.key())]
     pub tick_array: AccountLoader<'info, TickArrayState>,
 }
@@ -248,33 +260,28 @@ pub struct ProxySwap<'info> {
 #[instruction(tick_lower_index: i32, tick_upper_index: i32,tick_array_lower_start_index:i32,tick_array_upper_start_index:i32)]
 pub struct ProxyOpenPosition<'info> {
     pub clmm_program: Program<'info, AmmV3>,
-    /// Pays to mint the position
+
     #[account(mut)]
     pub payer: Signer<'info>,
-
 
     /// CHECK: Receives the position NFT
     pub position_nft_owner: UncheckedAccount<'info>,
 
-    /// CHECK: Unique token mint address, random keypair
     #[account(mut)]
     pub position_nft_mint: Signer<'info>,
 
     /// CHECK: Token account where position NFT will be minted
-    /// This account created in the contract by cpi to avoid large stack variables
     #[account(mut)]
     pub position_nft_account: UncheckedAccount<'info>,
 
-    /// To store metaplex metadata
-    /// CHECK: Safety check performed inside function body
+    /// CHECK: To store metaplex metadata
     #[account(mut)]
     pub metadata_account: UncheckedAccount<'info>,
 
-    /// Add liquidity for this pool
     #[account(mut)]
     pub pool_state: AccountLoader<'info, PoolState>,
 
-    /// CHECK: Store the information of market marking in range
+    /// CHECK: Safety check performed inside function body
     #[account(
         mut,
         seeds = [
@@ -301,7 +308,7 @@ pub struct ProxyOpenPosition<'info> {
     )]
     pub tick_array_lower: UncheckedAccount<'info>,
 
-    /// CHECK:Account to store data for the position's upper tick
+    /// CHECK: Account to store data for the position's upper tick
     #[account(
         mut,
         seeds = [
@@ -323,71 +330,56 @@ pub struct ProxyOpenPosition<'info> {
     )]
     pub personal_position: UncheckedAccount<'info>,
 
-    /// The token_0 account deposit token to the pool
     #[account(
         mut,
         token::mint = token_vault_0.mint
     )]
     pub token_account_0: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The token_1 account deposit token to the pool
     #[account(
         mut,
         token::mint = token_vault_1.mint
     )]
     pub token_account_1: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The address that holds pool tokens for token_0
     #[account(
         mut,
         constraint = token_vault_0.key() == pool_state.load()?.token_vault_0
     )]
     pub token_vault_0: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The address that holds pool tokens for token_1
     #[account(
         mut,
         constraint = token_vault_1.key() == pool_state.load()?.token_vault_1
     )]
     pub token_vault_1: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Sysvar for token mint and ATA creation
     pub rent: Sysvar<'info, Rent>,
 
-    /// Program to create the position manager state account
     pub system_program: Program<'info, System>,
 
-    /// Program to create mint account and mint tokens
     pub token_program: Program<'info, Token>,
-    /// Program to create an ATA for receiving position NFT
+
     pub associated_token_program: Program<'info, AssociatedToken>,
 
-    /// Program to create NFT metadata
-    /// CHECK: Metadata program address constraint applied
     pub metadata_program: Program<'info, Metadata>,
-    /// Program to create mint account and mint tokens
+
     pub token_program_2022: Program<'info, Token2022>,
-    /// The mint of token vault 0
+
     #[account(
         address = token_vault_0.mint
     )]
     pub vault_0_mint: Box<InterfaceAccount<'info, Mint>>,
-    /// The mint of token vault 1
+
     #[account(
         address = token_vault_1.mint
     )]
     pub vault_1_mint: Box<InterfaceAccount<'info, Mint>>,
-    // remaining account
-    // #[account(
-    //     seeds = [
-    //         POOL_TICK_ARRAY_BITMAP_SEED.as_bytes(),
-    //         pool_state.key().as_ref(),
-    //     ],
-    //     bump
-    // )]
-    // pub tick_array_bitmap: AccountLoader<'info, TickArrayBitmapExtension>,
 }
 
+/*
+ * State and helpers
+ */
 #[account]
 pub struct UserConfig {
     pub owner: Pubkey,
@@ -397,16 +389,20 @@ impl UserConfig {
     pub const SIZE: usize = 32 + 2;
 }
 
+/*
+ * Compute slippage tolerance threshold (min output / max input)
+ */
 fn compute_slippage_threshold(expected: u64, bps: u16, is_base_input: bool) -> u64 {
     if is_base_input {
-        // minimum output = expected * (1 - bps / 10_000)
         ((expected as u128 * (10_000u128 - bps as u128)) / 10_000u128) as u64
     } else {
-        // maximum input = expected * (1 + bps / 10_000)
         ((expected as u128 * (10_000u128 + bps as u128)) / 10_000u128) as u64
     }
 }
 
+/*
+ * Error codes
+ */
 #[error_code]
 pub enum CustomError {
     #[msg("Invalid slippage basis points")]
@@ -430,7 +426,6 @@ pub enum CustomError {
     #[msg("Invalid expected amount")]
     InvalidExpectedAmount,
 }
-
 
 #[event]
 pub struct SlippageSet {

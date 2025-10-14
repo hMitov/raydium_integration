@@ -6,6 +6,8 @@ import {
     Connection
 } from "@solana/web3.js";
 import {
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
     getAssociatedTokenAddressSync,
     createSyncNativeInstruction,
     getAccount,
@@ -15,15 +17,10 @@ import BN from "bn.js";
 import * as pkg from '@raydium-io/raydium-sdk-v2';
 const { Raydium, PoolUtils } = pkg;
 
-export interface PoolSelectionResult {
-    bestPool: any;
-    bestOutput: BN;
-    bestRate: number;
-    poolKeys: any;
-}
-
 const CLMM_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
-
+const SUMULATION_SWAP_SLIPPAGE = 0.01;
+//Todo: Think of a better way to exclude pools that didnt enable swaps
+const EXCLUDED_POOLS = ["3tD34VtprDSkYCnATtQLCiVgTkECU3d12KtjupeR6N2X", "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn"];
 /**
  * Ensures that a user's associated token account (ATA) exists for a given mint.
  * Creates it if it doesn't.
@@ -31,20 +28,25 @@ const CLMM_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 export async function ensureTokenAccount(provider: any, mint: PublicKey, owner: PublicKey) {
     const wallet = provider.wallet.publicKey;
     const ata = getAssociatedTokenAddressSync(mint, owner);
+
     try {
         await getAccount(provider.connection, ata);
         console.log(`ATA exists for ${mint.toBase58()}`);
     } catch {
-        console.log(`Creating ATA for ${mint.toBase58()}...`);
+        console.log(`Creating ATA for ${mint.toBase58()}`);
         const tx = new Transaction().add(
             createAssociatedTokenAccountInstruction(wallet, ata, owner, mint)
         );
         await provider.sendAndConfirm(tx);
         console.log(`Created ATA: ${ata.toBase58()}`);
     }
+
     return ata;
 }
 
+/**
+ * Wraps SOL into WSOL for a given wallet.
+ */
 export async function wrapSolToWsol(
     provider: any,
     wallet: PublicKey,
@@ -52,6 +54,7 @@ export async function wrapSolToWsol(
     solAmount: number
 ) {
     const lamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
+
     const tx = new Transaction().add(
         SystemProgram.transfer({
             fromPubkey: wallet,
@@ -75,25 +78,34 @@ export async function findOptimalPoolExactIn(
     mintA: PublicKey,
     mintB: PublicKey,
     amountIn: BN,
-): Promise<PoolSelectionResult> {
+): Promise<any> {
     try {
-        const raydium = await Raydium.load({ connection, owner: wallet, disableLoadToken: true });
+        const raydium = await Raydium.load({
+            connection,
+            owner: wallet,
+            disableLoadToken: true,
+        });
 
-        // Fetch all CLMM pools for this pair
         const poolData = await raydium.api.fetchPoolByMints({
             mint1: mintA.toBase58(),
-            mint2: mintB.toBase58()
+            mint2: mintB.toBase58(),
         });
-        const poolList = Array.isArray(poolData) ? poolData : (poolData as any).data || [];
-        const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM);
 
-        if (clmmPools.length === 0) {
-            throw new Error(`No CLMM pools found for ${mintA.toBase58()}/${mintB.toBase58()}`);
+        const poolList = Array.isArray(poolData)
+            ? poolData
+            : (poolData as any).data || [];
+
+        const clmmPools = poolList.filter(
+            (p) => p.programId === CLMM_PROGRAM
+        );
+
+        if (!clmmPools.length) {
+            throw new Error(
+                `No CLMM pools found for ${mintA.toBase58()}/${mintB.toBase58()}`
+            );
         }
 
-        console.log(`Found ${clmmPools.length} CLMM pools.`);
-
-        const results = [];
+        const results: any[] = [];
         const epochInfo = await connection.getEpochInfo();
 
         // Simulate swap for each pool
@@ -106,7 +118,7 @@ export async function findOptimalPoolExactIn(
                     tickArrayCache: tickData[pool.id],
                     amountIn: new BN(amountIn),
                     tokenOut: computePoolInfo.mintB,
-                    slippage: 0.01,
+                    slippage: SUMULATION_SWAP_SLIPPAGE,
                     epochInfo,
                 });
 
@@ -117,8 +129,8 @@ export async function findOptimalPoolExactIn(
                     results.push({
                         poolId: pool.id,
                         output: outputAmount,
-                        priceImpact: quote.priceImpact?.toString() || "0",
-                        fee: quote.fee?.toString() || "0",
+                        priceImpact: quote.priceImpact?.toString(),
+                        fee: quote.fee?.toString(),
                         rate,
                         pool,
                         poolKeys
@@ -136,7 +148,7 @@ export async function findOptimalPoolExactIn(
         // Select pool with highest output
         const best = results.sort((a, b) => b.output.sub(a.output).toNumber())[0];
 
-        console.log("\n Selected optimal CLMM pool:");
+        console.log("\n Best pool for exact in:");
         console.log(`   Pool ID: ${best.poolId}`);
         console.log(`   Expected Output: ${best.output.toString()}`);
         console.log(`   Rate: ${best.rate.toFixed(6)} USDC per WSOL`);
@@ -164,32 +176,34 @@ export async function findOptimalPoolExactOut(
     mintA: PublicKey,
     mintB: PublicKey,
     desiredOutput: BN
-): Promise<{
-    bestPool: ApiV3PoolInfoConcentratedItem;
-    poolKeys: ComputeClmmPoolInfo;
-    computePoolInfo: ComputeClmmPoolInfo;
-    amountIn: BN;
-    maxAmountIn: BN;
-    realAmountOut: BN;
-    remainingAccounts: any[];
-}> {
-    const raydium = await Raydium.load({ connection, owner: wallet, disableLoadToken: true });
+): Promise<any> {
+    const raydium = await Raydium.load({
+        connection,
+        owner: wallet,
+        disableLoadToken: true,
+    });
+
     const epochInfo = await connection.getEpochInfo();
 
-    // Fetch pools for this pair
     const poolData = await raydium.api.fetchPoolByMints({
         mint1: mintA.toBase58(),
         mint2: mintB.toBase58(),
     });
-    const poolList = Array.isArray(poolData) ? poolData : (poolData as any).data || [];
-    // const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM && p.id == "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn");
-    const clmmPools = poolList.filter((p) => p.programId === CLMM_PROGRAM);
 
-    if (clmmPools.length === 0) {
-        throw new Error(`No CLMM pools found for ${mintA.toBase58()}/${mintB.toBase58()}`);
-    }
+    const poolList = Array.isArray(poolData)
+        ? poolData
+        : (poolData as any).data || [];
 
-    const results = [];
+    const clmmPools = poolList.filter(
+        (p) => p.programId === CLMM_PROGRAM && !EXCLUDED_POOLS.includes(p.id)
+    );
+
+    if (!clmmPools.length)
+        throw new Error(
+            `No CLMM pools found for ${mintA.toBase58()}/${mintB.toBase58()}`
+        );
+
+    const results: any[] = [];
 
     // Simulate swap for each pool
     for (const pool of clmmPools) {
@@ -208,13 +222,12 @@ export async function findOptimalPoolExactOut(
                 ? new PublicKey(poolInfo.mintA.address)
                 : new PublicKey(poolInfo.mintB.address);
 
-            // Compute required input for exact output
             const { amountIn, maxAmountIn, realAmountOut, remainingAccounts } = await PoolUtils.computeAmountIn({
                 poolInfo: computePoolInfo,
                 tickArrayCache: tickData[pool.id],
                 amountOut: desiredOutput,
                 baseMint: outputMint,
-                slippage: 0.01,
+                slippage: SUMULATION_SWAP_SLIPPAGE,
                 epochInfo,
             });
 
@@ -258,6 +271,27 @@ export async function findOptimalPoolExactOut(
         maxAmountIn: best.maxAmountIn,
         realAmountOut: best.realAmountOut,
         remainingAccounts: best.remainingAccounts,
+        
     };
-
 }
+
+export async function getCorrectNftAta(
+    connection: Connection,
+    nftMint: PublicKey,
+    owner: PublicKey
+  ): Promise<{
+    ata: PublicKey;
+    tokenProgram: PublicKey;
+  }> {
+    const mintAcc = await connection.getAccountInfo(nftMint);
+    if (!mintAcc) {
+      throw new Error(`Mint account ${nftMint.toBase58()} not found on-chain`);
+    }
+  
+    const isToken2022 = mintAcc.owner.equals(TOKEN_2022_PROGRAM_ID);
+    const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;  
+    // Derive the proper ATA
+    const ata = getAssociatedTokenAddressSync(nftMint, owner, false, tokenProgram);
+  
+    return { ata, tokenProgram };
+  }
