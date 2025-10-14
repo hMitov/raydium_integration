@@ -19,8 +19,7 @@ const { Raydium, PoolUtils } = pkg;
 
 const CLMM_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 const SUMULATION_SWAP_SLIPPAGE = 0.01;
-//Todo: Think of a better way to exclude pools that didnt enable swaps
-// const EXCLUDED_POOLS = ["3tD34VtprDSkYCnATtQLCiVgTkECU3d12KtjupeR6N2X", "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn"];
+
 /**
  * Ensures that a user's associated token account (ATA) exists for a given mint.
  * Creates it if it doesn't.
