@@ -120,7 +120,7 @@ brew install txtx/taps/surfpool
 snap install surfpool
 
 # Or build from source
-git clone https://github.com/txtx/surfpool.git
+git clone https://github.com/hMitov/raydium_integration.git
 cd surfpool
 cargo surfpool-install
 ```
