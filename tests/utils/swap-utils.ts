@@ -20,7 +20,7 @@ const { Raydium, PoolUtils } = pkg;
 const CLMM_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 const SUMULATION_SWAP_SLIPPAGE = 0.01;
 //Todo: Think of a better way to exclude pools that didnt enable swaps
-const EXCLUDED_POOLS = ["3tD34VtprDSkYCnATtQLCiVgTkECU3d12KtjupeR6N2X", "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn"];
+// const EXCLUDED_POOLS = ["3tD34VtprDSkYCnATtQLCiVgTkECU3d12KtjupeR6N2X", "EXHyQxMSttcvLPwjENnXCPZ8GmLjJYHtNBnAkcFeFKMn"];
 /**
  * Ensures that a user's associated token account (ATA) exists for a given mint.
  * Creates it if it doesn't.
@@ -113,6 +113,21 @@ export async function findOptimalPoolExactIn(
             try {
                 const { poolKeys, computePoolInfo, tickData } = await raydium.clmm.getPoolInfoFromRpc(pool.id);
 
+                // Check if pool is approved for swaps by reading the status bit
+                const poolAccount = await connection.getAccountInfo(new PublicKey(pool.id));
+                if (!poolAccount) {
+                    console.log(`Skipping ${pool.id} — pool account not found`);
+                    continue;
+                }
+
+                // Read the status field from the pool state account
+                const status = poolAccount.data.readUInt32LE(8);
+                const swapBit = status & 1; // Check if swap bit (bit 0) is set
+                
+                if (swapBit === 0) {
+                    continue;
+                }
+
                 const quote = PoolUtils.computeAmountOutFormat({
                     poolInfo: computePoolInfo,
                     tickArrayCache: tickData[pool.id],
@@ -195,7 +210,7 @@ export async function findOptimalPoolExactOut(
         : (poolData as any).data || [];
 
     const clmmPools = poolList.filter(
-        (p) => p.programId === CLMM_PROGRAM && !EXCLUDED_POOLS.includes(p.id)
+        (p) => p.programId === CLMM_PROGRAM
     );
 
     if (!clmmPools.length)
@@ -209,6 +224,21 @@ export async function findOptimalPoolExactOut(
     for (const pool of clmmPools) {
         try {
             const { poolInfo, poolKeys, computePoolInfo, tickData } = await raydium.clmm.getPoolInfoFromRpc(pool.id);
+
+            // Check if pool is approved for swaps by reading the status bit
+            const poolAccount = await connection.getAccountInfo(new PublicKey(pool.id));
+            if (!poolAccount) {
+                console.log(`Skipping ${pool.id} — pool account not found`);
+                continue;
+            }
+
+            // Read the status field from the pool state account
+            const status = poolAccount.data.readUInt32LE(8);
+            const swapBit = status & 1; // Check if swap bit (bit 0) is set
+            
+            if (swapBit === 0) {
+                continue;
+            }
 
             const isMintAOutput = poolInfo.mintA.address === mintB.toBase58();
             const isMintBOutput = poolInfo.mintB.address === mintB.toBase58();
