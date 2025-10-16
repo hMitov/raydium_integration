@@ -11,7 +11,7 @@ use raydium_amm_v3::{
     },
 };
 
-declare_id!("EgVzMskheVJTgMRuWRxfxae9JjfA8Ernjx77NgGHoNzT");
+declare_id!("CrMxnHJvvk2eRP8H1DLtc2ZTQfzD9NSxJKkDquCzr1Qu");
 
 pub const DEFAULT_SLIPPAGE_BPS: u16 = 500;
 

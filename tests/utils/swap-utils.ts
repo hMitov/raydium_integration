@@ -6,8 +6,6 @@ import {
     Connection
 } from "@solana/web3.js";
 import {
-    TOKEN_PROGRAM_ID,
-    TOKEN_2022_PROGRAM_ID,
     getAssociatedTokenAddressSync,
     createSyncNativeInstruction,
     getAccount,
@@ -127,6 +125,12 @@ export async function findOptimalPoolExactIn(
                     continue;
                 }
 
+                // Check if the pool has any tick arrays available
+                if (!tickData[pool.id] || Object.keys(tickData[pool.id]).length === 0) {
+                    console.log(`Skipping pool ${pool.id} - no tick arrays available`);
+                    continue;
+                }
+
                 const quote = PoolUtils.computeAmountOutFormat({
                     poolInfo: computePoolInfo,
                     tickArrayCache: tickData[pool.id],
@@ -147,7 +151,8 @@ export async function findOptimalPoolExactIn(
                         fee: quote.fee?.toString(),
                         rate,
                         pool,
-                        poolKeys
+                        poolKeys,
+                        computePoolInfo
                     });
                 }
             } catch (err: any) {
@@ -170,9 +175,11 @@ export async function findOptimalPoolExactIn(
 
         return {
             bestPool: best.pool,
+            poolKeys: best.poolKeys,
+            computePoolInfo: best.computePoolInfo,
             bestOutput: best.output,
             bestRate: best.rate,
-            poolKeys: best.poolKeys
+            remainingAccounts: best.remainingAccounts,
         };
     } catch (error: any) {
         console.error("findOptimalPoolExactIn() failed:", error.message);
@@ -251,6 +258,12 @@ export async function findOptimalPoolExactOut(
                 ? new PublicKey(poolInfo.mintA.address)
                 : new PublicKey(poolInfo.mintB.address);
 
+            // Check if the pool has any tick arrays available
+            if (!tickData[pool.id] || Object.keys(tickData[pool.id]).length === 0) {
+                console.log(`Skipping pool ${pool.id} - no tick arrays available`);
+                continue;
+            }
+
             const { amountIn, maxAmountIn, realAmountOut, remainingAccounts } = await PoolUtils.computeAmountIn({
                 poolInfo: computePoolInfo,
                 tickArrayCache: tickData[pool.id],
@@ -300,27 +313,5 @@ export async function findOptimalPoolExactOut(
         maxAmountIn: best.maxAmountIn,
         realAmountOut: best.realAmountOut,
         remainingAccounts: best.remainingAccounts,
-        
     };
 }
-
-export async function getCorrectNftAta(
-    connection: Connection,
-    nftMint: PublicKey,
-    owner: PublicKey
-  ): Promise<{
-    ata: PublicKey;
-    tokenProgram: PublicKey;
-  }> {
-    const mintAcc = await connection.getAccountInfo(nftMint);
-    if (!mintAcc) {
-      throw new Error(`Mint account ${nftMint.toBase58()} not found on-chain`);
-    }
-  
-    const isToken2022 = mintAcc.owner.equals(TOKEN_2022_PROGRAM_ID);
-    const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;  
-    // Derive the proper ATA
-    const ata = getAssociatedTokenAddressSync(nftMint, owner, false, tokenProgram);
-  
-    return { ata, tokenProgram };
-  }

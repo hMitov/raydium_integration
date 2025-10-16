@@ -244,7 +244,8 @@ describe("raydium_integration", () => {
         observationState: poolKeys.observationId,
         tokenProgram: TOKEN_PROGRAM_ID,
         tickArray: tickArrayAddr,
-      }).rpc({ skipPreflight: true, commitment: "confirmed" });
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
 
     console.log("Exact swap in executed successfully!");
 
@@ -261,6 +262,9 @@ describe("raydium_integration", () => {
   });
 
   it("finds best pool and swaps exact out (WSOL → USDC)", async () => {
+    // Add small delay to avoid transaction conflicts
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     const connection = provider.connection;
     const walletPubkey = wallet;
 
@@ -275,8 +279,7 @@ describe("raydium_integration", () => {
       poolKeys,
       computePoolInfo,
       amountIn,
-      maxAmountIn,
-      remainingAccounts,
+      maxAmountIn
     } = await findOptimalPoolExactOut(connection, walletPubkey, inputMint, outputMint, desiredOut);
 
     const usdcAta = await ensureTokenAccount(provider, outputMint, walletPubkey);
@@ -286,15 +289,6 @@ describe("raydium_integration", () => {
     const wsolBefore = await getAccount(connection, wsolAta);
     const usdcBefore = await getAccount(connection, usdcAta);
 
-    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
-      computePoolInfo.tickCurrent,
-      computePoolInfo.tickSpacing
-    );
-    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
-      new PublicKey(CLMM_PROGRAM),
-      new PublicKey(bestPool.id),
-      startTickIndex
-    );
 
     // Determine direction (vault mapping)
     const inputIsMintA = computePoolInfo.mintA.address === inputMint.toBase58();
@@ -310,12 +304,16 @@ describe("raydium_integration", () => {
       })
       .rpc();
 
-    const tickArrayAccounts =
-      remainingAccounts?.map(acc => ({
-        pubkey: new PublicKey(acc.pubkey ?? acc),
-        isSigner: false,
-        isWritable: false,
-      })) ?? [];
+    const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(bestPool.id);
+    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
+      (poolInfo as any).tickCurrent,
+      (poolInfo as any).tickSpacing
+    );
+    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
+      new PublicKey(CLMM_PROGRAM),
+      new PublicKey(bestPool.id),
+      startTickIndex
+    );
 
     // Execute swap via Anchor proxySwap instruction
     const txSig = await program.methods
@@ -333,9 +331,7 @@ describe("raydium_integration", () => {
         observationState: poolKeys.observationId,
         tokenProgram: TOKEN_PROGRAM_ID,
         tickArray: tickArrayAddr,
-      })
-      .remainingAccounts(tickArrayAccounts)
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      }).rpc({ skipPreflight: true, commitment: "confirmed" });
 
     console.log("Exact swap out executed successfully!");
 
