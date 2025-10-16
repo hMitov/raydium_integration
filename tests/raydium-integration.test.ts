@@ -31,14 +31,13 @@ import {
   wrapSolToWsol,
   findOptimalPoolExactIn,
   findOptimalPoolExactOut,
+  findCorrectTickArray,
 } from "./utils/swap-utils";
 
 describe("raydium_integration", () => {
   // Raydium CLMM mainnet constants
   const CLMM_PROGRAM = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
   const POOL_STATE = new PublicKey("3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv");
-  const AMM_CONFIG = new PublicKey("3h2e43PunVA5K34vwKCLHWhZF4aZpyaC9RmxvshGAQpL");
-  const OBSERVATION_STATE = new PublicKey("3Y695CuQ8AP4anbwAqiEBeQF9KxqHFr8piEwvw3UePnQ");
   const INPUT_VAULT = new PublicKey("4ct7br2vTPzfdmY3S5HLtTxcGSBfn6pnw98hsS6v359A"); // WSOL vault
   const OUTPUT_VAULT = new PublicKey("5it83u57VRrVgc51oNV19TTmAJuffPx5GtGwQr7gQNUo"); // USDC vault
   const INPUT_VAULT_MINT = new PublicKey("So11111111111111111111111111111111111111112"); // WSOL
@@ -86,118 +85,9 @@ describe("raydium_integration", () => {
     console.log("Slippage set to 3%");
   });
 
-  it("swaps exact in (WSOL → USDC)", async () => {
-    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
-    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
-    wrapSolToWsol(provider, wallet, wsolAta, WSOL_AMOUNT);
-
-    // Expected USDC (quote)
-    const amountIn = new BN(1_000_000_000); // 1 SOL
-    const expectedUsdc = new BN(130_000_000); // expected 130 USDC
-    const sqrtPriceLimitX64 = new BN(0);
-    const isBaseInput = true;
-
-    const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
-    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
-      (poolInfo as any).tickCurrent,
-      (poolInfo as any).tickSpacing
-    );
-
-    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
-      new PublicKey(CLMM_PROGRAM),
-      new PublicKey(POOL_STATE.toBase58()),
-      startTickIndex
-    );
-
-    const tx = await program.methods
-      .proxySwap(amountIn, expectedUsdc, sqrtPriceLimitX64, isBaseInput)
-      .accountsStrict({
-        clmmProgram: CLMM_PROGRAM,
-        payer: wallet,
-        userCfg: USER_CFG,
-        ammConfig: AMM_CONFIG,
-        poolState: POOL_STATE,
-        inputTokenAccount: wsolAta,
-        outputTokenAccount: usdcAta,
-        inputVault: INPUT_VAULT,
-        outputVault: OUTPUT_VAULT,
-        observationState: OBSERVATION_STATE,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        tickArray: tickArrayAddr,
-      }).rpc({ skipPreflight: true, commitment: "confirmed" });
-
-    console.log("Exact in swap sent successfully!");
-
-    // Verify the swap worked
-    const usdcBalanceAfter = await getAccount(provider.connection, usdcAta);
-
-    // Calculate actual slippage
-    const expectedUsdcBN = new BN(expectedUsdc.toString());
-    const actualUsdc = new BN(usdcBalanceAfter.amount.toString());
-    const slippageBps = expectedUsdcBN.sub(actualUsdc).mul(new BN(10000)).div(expectedUsdcBN);
-
-    expect(slippageBps.toNumber()).to.be.lessThanOrEqual(SLIPPAGE_BPS);
-  });
-
-  it("swaps exact out (WSOL → USDC)", async () => {
-    const usdcAta = await ensureTokenAccount(provider, OUTPUT_VAULT_MINT, wallet);
-    const wsolAta = await ensureTokenAccount(provider, INPUT_VAULT_MINT, wallet);
-    await wrapSolToWsol(provider, wallet, wsolAta, WSOL_AMOUNT);
-
-    const desiredOut = new BN(100_000); // 0.1 USDC
-    const expectedMaxIn = new BN(100_000_000); // 0.1 SOL
-    const sqrtPriceLimitX64 = new BN(0);
-    const isBaseInput = false;
-
-    const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(POOL_STATE.toBase58());
-    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
-      (poolInfo as any).tickCurrent,
-      (poolInfo as any).tickSpacing
-    );
-    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
-      new PublicKey(CLMM_PROGRAM),
-      new PublicKey(POOL_STATE.toBase58()),
-      startTickIndex
-    );
-
-    const wsolBefore = await getAccount(provider.connection, wsolAta);
-    const usdcBefore = await getAccount(provider.connection, usdcAta);
-
-    const tx = await program.methods
-      .proxySwap(desiredOut, expectedMaxIn, sqrtPriceLimitX64, isBaseInput)
-      .accountsStrict({
-        clmmProgram: CLMM_PROGRAM,
-        payer: wallet,
-        userCfg: USER_CFG,
-        ammConfig: AMM_CONFIG,
-        poolState: POOL_STATE,
-        inputTokenAccount: wsolAta,
-        outputTokenAccount: usdcAta,
-        inputVault: INPUT_VAULT,
-        outputVault: OUTPUT_VAULT,
-        observationState: OBSERVATION_STATE,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        tickArray: tickArrayAddr,
-      }).rpc({ skipPreflight: true, commitment: "confirmed" });
-
-    // Verify the exact out swap worked
-    const wsolAfter = await getAccount(provider.connection, wsolAta);
-    const usdcAfter = await getAccount(provider.connection, usdcAta);
-
-    const usdcReceived = new BN(usdcAfter.amount.toString()).sub(new BN(usdcBefore.amount.toString()));
-    const wsolSpent = new BN(wsolBefore.amount.toString()).sub(new BN(wsolAfter.amount.toString()));
-
-    expect(usdcReceived.gte(desiredOut), "USDC received less than desired").to.be.true;
-
-    // Check slippage (input side) - for exact out, compare actual spent vs max allowed
-    const slippageBps = wsolSpent.mul(new BN(10000)).div(expectedMaxIn);
-
-    expect(slippageBps.toNumber(), "Input slippage exceeds 5% tolerance").to.be.lte(MAX_SLIPPAGE_BPS);
-  });
-
   it("finds best pool and swaps exact in (WSOL → USDC)", async () => {
     const amountIn = new BN(1_000_000_000); // 1 SOL in lamports
-    const { bestPool, bestOutput, poolKeys } = await findOptimalPoolExactIn(
+    const { poolInfo, amountOut, poolKeys } = await findOptimalPoolExactIn(
       provider.connection,
       wallet,
       INPUT_VAULT_MINT,
@@ -212,22 +102,13 @@ describe("raydium_integration", () => {
     const sqrtPriceLimitX64 = new BN(0);
     const isBaseInput = true;
 
-    const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(bestPool.id);
-    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
-      (poolInfo as any).tickCurrent,
-      (poolInfo as any).tickSpacing
-    );
-    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
-      new PublicKey(CLMM_PROGRAM),
-      new PublicKey(bestPool.id),
-      startTickIndex
-    );
+    const tickArrayAddr = await findCorrectTickArray(poolInfo, true);
 
     console.log("Executing swap with optimal pool...");
     const tx = await program.methods
       .proxySwap(
         amountIn,
-        bestOutput,
+        amountOut,
         sqrtPriceLimitX64,
         isBaseInput
       )
@@ -236,7 +117,7 @@ describe("raydium_integration", () => {
         payer: wallet,
         userCfg: USER_CFG,
         ammConfig: poolKeys.ammConfig.id,
-        poolState: bestPool.id,
+        poolState: poolInfo.id,
         inputTokenAccount: wsolAta,
         outputTokenAccount: usdcAta,
         inputVault: poolKeys.vaultA,
@@ -253,7 +134,7 @@ describe("raydium_integration", () => {
     const usdcBalanceAfter = await getAccount(provider.connection, usdcAta);
 
     // Calculate actual slippage
-    const expectedUsdcBN = new BN(bestOutput.toString());
+    const expectedUsdcBN = new BN(amountOut.toString());
     const actualUsdc = new BN(usdcBalanceAfter.amount.toString());
     const slippageBps = expectedUsdcBN.sub(actualUsdc).mul(new BN(10000)).div(expectedUsdcBN);
 
@@ -275,7 +156,7 @@ describe("raydium_integration", () => {
     const isBaseInput = false;
 
     const {
-      bestPool,
+      poolInfo,
       poolKeys,
       computePoolInfo,
       amountIn,
@@ -288,7 +169,6 @@ describe("raydium_integration", () => {
 
     const wsolBefore = await getAccount(connection, wsolAta);
     const usdcBefore = await getAccount(connection, usdcAta);
-
 
     // Determine direction (vault mapping)
     const inputIsMintA = computePoolInfo.mintA.address === inputMint.toBase58();
@@ -303,17 +183,9 @@ describe("raydium_integration", () => {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
-
-    const { poolInfo } = await raydium.clmm.getPoolInfoFromRpc(bestPool.id);
-    const startTickIndex = TickUtils.getTickArrayStartIndexByTick(
-      (poolInfo as any).tickCurrent,
-      (poolInfo as any).tickSpacing
-    );
-    const { publicKey: tickArrayAddr } = getPdaTickArrayAddress(
-      new PublicKey(CLMM_PROGRAM),
-      new PublicKey(bestPool.id),
-      startTickIndex
-    );
+     
+     // For exact out swaps, we're going from token0 to token1, so zero_for_one = true
+     const tickArrayAddr = await findCorrectTickArray(poolInfo, true);
 
     // Execute swap via Anchor proxySwap instruction
     const txSig = await program.methods
@@ -323,7 +195,7 @@ describe("raydium_integration", () => {
         payer: walletPubkey,
         userCfg: USER_CFG,
         ammConfig: poolKeys.ammConfig.id,
-        poolState: bestPool.id,
+        poolState: poolInfo.id,
         inputTokenAccount: wsolAta,
         outputTokenAccount: usdcAta,
         inputVault,
