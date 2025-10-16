@@ -230,8 +230,6 @@ export async function findOptimalPoolExactOut(
         try {
             const { poolInfo, poolKeys, computePoolInfo, tickData } = await raydium.clmm.getPoolInfoFromRpc(pool.id)
 
-            console.log("tickCurrent on find optimal pool: ", computePoolInfo.tickCurrent);
-
             // Check if pool is approved for swaps by reading the status bit
             const poolAccount = await connection.getAccountInfo(new PublicKey(pool.id));
             if (!poolAccount) {
